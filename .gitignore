@@ -8,3 +8,6 @@ staticfiles/
 .pytest_cache/
 *.log
 .env.example
+tickets/migrations/0004_alter_ticket_category.py
+tickets/migrations/0003_alter_ticket_category.py
+tickets/migrations/0002_alter_ticket_category.py
