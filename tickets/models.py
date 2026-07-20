@@ -27,6 +27,9 @@ class TicketCategory(models.TextChoices):
     SOFTWARE = "SOFTWARE", "Software"
     RED = "RED", "Red / Conectividad"
     ACCESOS = "ACCESOS", "Accesos y Cuentas"
+    RESERVA_DE_SALAS = "RESERVA_DE_SALAS", "Reserva de Salas"
+    RECLAMOS = "RECLAMOS", "Reclamos"
+    SUGERENCIAS = "SUGERENCIAS", "Sugerencias"
     OTRO = "OTRO", "Otro"
 
 

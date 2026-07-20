@@ -9,6 +9,9 @@ _DEFAULT_PRIORITY_BY_CATEGORY: dict[str, str] = {
     TicketCategory.ACCESOS: TicketPriority.ALTA,
     TicketCategory.HARDWARE: TicketPriority.MEDIA,
     TicketCategory.SOFTWARE: TicketPriority.MEDIA,
+    TicketCategory.RECLAMOS: TicketPriority.BAJA,
+    TicketCategory.SUGERENCIAS: TicketPriority.BAJA,
+    TicketCategory.RESERVA_DE_SALAS: TicketPriority.BAJA,
     TicketCategory.OTRO: TicketPriority.BAJA,
 }
 
