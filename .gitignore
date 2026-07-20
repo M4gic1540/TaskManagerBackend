@@ -14,3 +14,5 @@ tickets/migrations/0002_alter_ticket_category.py
 tickets/migrations/0005_alter_ticket_category.py
 tickets/migrations/0007_alter_ticket_category.py
 tickets/migrations/0006_alter_ticket_category.py
+tickets/migrations/0006_alter_ticket_category.py
+tickets/migrations/0007_alter_ticket_category.py
