@@ -1,0 +1,73 @@
+"""Tests de self_assign (Técnico toma ticket sin asignar). Usa DB real
+(pytest-django) porque el método usa `select_for_update()` — igual que
+DashboardService/UserService, fakear el locking testearía una
+reimplementación manual, no el comportamiento real."""
+import pytest
+
+from accounts.models import Role, User
+from core.events.base import EventBus
+from core.exceptions import (
+    InvalidStateTransitionError,
+    PermissionDeniedError,
+    ValidationError,
+)
+from tickets.models import Ticket, TicketCategory, TicketPriority, TicketStatus
+from tickets.services.ticket_service import TicketService
+
+pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True)
+def _reset_event_bus():
+    EventBus.reset()
+    yield
+    EventBus.reset()
+
+
+@pytest.fixture
+def requester():
+    return User.objects.create_user(username="req1", password="x", role=Role.USUARIO)
+
+
+@pytest.fixture
+def technician():
+    return User.objects.create_user(username="tech1", password="x", role=Role.TECNICO)
+
+
+@pytest.fixture
+def unassigned_ticket(requester):
+    return Ticket.objects.create(
+        title="Ticket sin asignar", description="d", category=TicketCategory.HARDWARE,
+        priority=TicketPriority.MEDIA, status=TicketStatus.ABIERTO, requester=requester,
+    )
+
+
+class TestSelfAssign:
+    def test_technician_takes_unassigned_ticket(self, technician, unassigned_ticket):
+        updated = TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=technician)
+        assert updated.status == TicketStatus.ASIGNADO
+        assert updated.assigned_technician_id == technician.id
+
+    def test_non_technician_cannot_take_ticket(self, requester, unassigned_ticket):
+        with pytest.raises(PermissionDeniedError):
+            TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=requester)
+
+    def test_deactivated_technician_cannot_take_ticket(self, technician, unassigned_ticket):
+        technician.is_active_technician = False
+        technician.save(update_fields=["is_active_technician"])
+        with pytest.raises(PermissionDeniedError):
+            TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=technician)
+
+    def test_cannot_take_already_assigned_ticket(self, technician, unassigned_ticket):
+        other_tech = User.objects.create_user(username="tech2", password="x", role=Role.TECNICO)
+        TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=other_tech)
+
+        with pytest.raises(ValidationError):
+            TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=technician)
+
+    def test_cannot_take_ticket_not_in_abierto_status(self, technician, unassigned_ticket):
+        unassigned_ticket.status = TicketStatus.CANCELADO
+        unassigned_ticket.save(update_fields=["status"])
+
+        with pytest.raises(InvalidStateTransitionError):
+            TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=technician)
