@@ -332,3 +332,83 @@ class GLPIDashboardSummaryView(LoopRegisteringMixin, AsyncAPIView):
         summary = await get_summary()
         return Response(summary)
 
+
+class GLPIQRImagesZipView(APIView):
+    """Descarga un ZIP con imágenes PNG de QRs de activos GLPI (QR + S/N)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(
+        summary="Descargar QRs como imágenes PNG en ZIP",
+        parameters=[
+            OpenApiParameter(
+                "ids",
+                str,
+                required=True,
+                description="IDs de activos GLPI separados por coma, ej: pc_123,monitor_45,periferico_10",
+            ),
+        ],
+    )
+    def get(self, request):
+        raw_ids = request.query_params.get("ids", "")
+        asset_ids = [value.strip() for value in raw_ids.split(",") if value.strip()]
+
+        if not asset_ids:
+            return Response(
+                {"detail": "Debes indicar al menos un id en 'ids'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            service = GLPIInventoryService()
+            content = service.generate_qr_images_zip(asset_ids=asset_ids)
+        except DomainError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_404_NOT_FOUND)
+
+        response = HttpResponse(content, content_type="application/zip")
+        response["Content-Disposition"] = 'attachment; filename="qr_glpi.zip"'
+        return response
+
+
+class AssetQRImagesZipView(APIView):
+    """Descarga un ZIP con imágenes PNG de QRs de activos locales (QR + S/N)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(
+        summary="Descargar QRs de activos locales como imágenes PNG en ZIP",
+        parameters=[
+            OpenApiParameter(
+                "ids",
+                str,
+                required=True,
+                description="IDs de activos separados por coma, ej: 1,2,7,15",
+            ),
+        ],
+    )
+    def get(self, request):
+        raw_ids = request.query_params.get("ids", "")
+        try:
+            asset_ids = [int(value) for value in raw_ids.split(",") if value.strip()]
+        except ValueError:
+            return Response(
+                {"detail": "El parámetro 'ids' debe ser una lista de enteros separados por coma."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not asset_ids:
+            return Response(
+                {"detail": "Debes indicar al menos un id en 'ids'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            service = AssetService()
+            content = service.generate_qr_images_zip(asset_ids=asset_ids)
+        except DomainError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_404_NOT_FOUND)
+
+        response = HttpResponse(content, content_type="application/zip")
+        response["Content-Disposition"] = 'attachment; filename="qr_activos.zip"'
+        return response
+

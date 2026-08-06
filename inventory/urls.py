@@ -7,9 +7,11 @@ from inventory.api.views import (
     AssetListCreateView,
     AssetPublicDetailView,
     AssetQRSheetView,
+    AssetQRImagesZipView,
     AssetRegenerateQRView,
     GLPIAssetListView,
     GLPIDashboardSummaryView,
+    GLPIQRImagesZipView,
     InventoryDashboardSummaryView,
 )
 
@@ -17,9 +19,11 @@ urlpatterns = [
     path("", AssetListCreateView.as_view(), name="asset-list-create"),
     path("glpi/", GLPIAssetListView.as_view(), name="asset-glpi-list"),
     path("glpi/summary/", GLPIDashboardSummaryView.as_view(), name="asset-glpi-summary"),
+    path("glpi/qr-images/", GLPIQRImagesZipView.as_view(), name="asset-glpi-qr-images"),
     path("import/", AssetImportView.as_view(), name="asset-import"),
     path("dashboard/", InventoryDashboardSummaryView.as_view(), name="asset-dashboard"),
     path("qr-sheet/", AssetQRSheetView.as_view(), name="asset-qr-sheet"),
+    path("qr-images/", AssetQRImagesZipView.as_view(), name="asset-qr-images"),
     path("<int:asset_id>/", AssetDetailView.as_view(), name="asset-detail"),
     path("<int:asset_id>/regenerate-qr/", AssetRegenerateQRView.as_view(), name="asset-regenerate-qr"),
     path("public/<uuid:public_uuid>/", AssetPublicDetailView.as_view(), name="asset-public-detail"),

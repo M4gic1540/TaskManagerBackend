@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import base64
 import io
+import math
+import re
+import zipfile
 from typing import Any, Dict, List, Optional
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 from django.db import connections
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Cm
 
 
 TABLE_MAPPING = [
@@ -167,3 +174,191 @@ class GLPIInventoryService:
             "by_status": by_status,
             "top_locations": sorted_locations,
         }
+
+    def _generate_qr_png_bytes(self, url: str, *, box_size: int = 8) -> bytes:
+        """Genera QR en alta resolución para impresión."""
+        qr = qrcode.QRCode(box_size=box_size, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def generate_qr_sheet_docx(self, *, asset_ids: list[str]) -> bytes:
+        """Genera documento Word con QRs de GLPI y S/N debajo. asset_ids es lista
+        de strings formato 'pc_123' o 'monitor_45' (category_id). Solo muestra QR + S/N."""
+        connection = connections[self.db_alias]
+        glpi_base_url = getattr(settings, "GLPI_BASE_URL", "https://glpi.cmm.uchile.cl").rstrip("/")
+
+        assets_data = []
+        for asset_id in asset_ids:
+            if "_" not in asset_id:
+                continue
+            cat_code, obj_id = asset_id.split("_", 1)
+            obj_id = int(obj_id)
+
+            for table_name, category, form_page in TABLE_MAPPING:
+                if cat_code.upper() != category:
+                    continue
+
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT t.serial FROM {table_name} t
+                        WHERE t.id = %s AND t.is_deleted = 0
+                        """,
+                        [obj_id],
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        glpi_url = f"{glpi_base_url}/front/{form_page}?id={obj_id}"
+                        assets_data.append({
+                            "serial": row[0] or "",
+                            "glpi_url": glpi_url,
+                        })
+                break
+
+        if not assets_data:
+            from core.exceptions import EntityNotFoundError
+            raise EntityNotFoundError("Ninguno de los activos solicitados existe.")
+
+        document = Document()
+        document.add_heading("Etiquetas QR de Inventario GLPI", level=1)
+
+        columns = 3
+        rows = math.ceil(len(assets_data) / columns)
+        table = document.add_table(rows=rows, cols=columns)
+
+        for index, asset in enumerate(assets_data):
+            cell = table.cell(index // columns, index % columns)
+
+            image_paragraph = cell.paragraphs[0]
+            image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            image_paragraph.add_run().add_picture(
+                io.BytesIO(self._generate_qr_png_bytes(asset["glpi_url"])), width=Cm(2.5)
+            )
+
+            if asset["serial"]:
+                serial_paragraph = cell.add_paragraph()
+                serial_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                serial_paragraph.add_run(asset["serial"]).bold = True
+
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    def _load_font(self, size: int = 28):
+        """Carga una fuente disponible del sistema."""
+        font_candidates = [
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+        for path in font_candidates:
+            try:
+                return ImageFont.truetype(path, size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    def _build_label_image(self, serial_number: str, target_url: str) -> io.BytesIO:
+        """Construye una imagen PNG de 100x100px con QR + S/N debajo."""
+        qr = qrcode.QRCode(
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=2,
+            border=1,
+        )
+        qr.add_data(target_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+        # Redimensionar QR a 100x100px
+        qr_img = qr_img.resize((100, 100), Image.Resampling.LANCZOS)
+
+        # Canvas: 100px de ancho, 100px QR + 30px para S/N
+        canvas_width = 100
+        canvas_height = 130
+        canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+        canvas.paste(qr_img, (0, 0))
+
+        # Dibujar el S/N debajo
+        draw = ImageDraw.Draw(canvas)
+        font = self._load_font(size=12)
+        text = serial_number.strip()
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_x = (canvas_width - text_width) / 2
+        text_y = 105
+        draw.text((text_x, text_y), text, fill="black", font=font)
+
+        buffer = io.BytesIO()
+        canvas.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer
+
+    def _sanitize_filename(self, serial_number: str) -> str:
+        """Sanitiza el nombre de archivo."""
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", serial_number.strip())
+        return safe or "sin_sn"
+
+    def generate_qr_images_zip(self, *, asset_ids: list[str]) -> bytes:
+        """Genera un ZIP con imágenes PNG de QRs (QR + S/N).
+        asset_ids es lista de strings formato 'pc_123' o 'monitor_45'."""
+        connection = connections[self.db_alias]
+        glpi_base_url = getattr(settings, "GLPI_BASE_URL", "https://glpi.cmm.uchile.cl").rstrip("/")
+
+        assets_data = []
+        for asset_id in asset_ids:
+            if "_" not in asset_id:
+                continue
+            cat_code, obj_id = asset_id.split("_", 1)
+            obj_id = int(obj_id)
+
+            for table_name, category, form_page in TABLE_MAPPING:
+                if cat_code.upper() != category:
+                    continue
+
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT t.serial FROM {table_name} t
+                        WHERE t.id = %s AND t.is_deleted = 0
+                        """,
+                        [obj_id],
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        glpi_url = f"{glpi_base_url}/front/{form_page}?id={obj_id}"
+                        assets_data.append({
+                            "serial": row[0] or "SIN_SN",
+                            "glpi_url": glpi_url,
+                        })
+                break
+
+        if not assets_data:
+            from core.exceptions import EntityNotFoundError
+            raise EntityNotFoundError("Ninguno de los activos solicitados existe.")
+
+        # Crear ZIP
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            used_names = set()
+            for asset in assets_data:
+                filename = f"{self._sanitize_filename(asset['serial'])}.png"
+
+                # Si el nombre ya existe, agregar sufijo
+                if filename in used_names:
+                    base, ext = filename.rsplit(".", 1)
+                    suffix = 2
+                    while f"{base}_{suffix}.{ext}" in used_names:
+                        suffix += 1
+                    filename = f"{base}_{suffix}.{ext}"
+
+                used_names.add(filename)
+                image_buffer = self._build_label_image(asset["serial"], asset["glpi_url"])
+                zip_file.writestr(filename, image_buffer.getvalue())
+
+        zip_buffer.seek(0)
+        return zip_buffer.getvalue()
