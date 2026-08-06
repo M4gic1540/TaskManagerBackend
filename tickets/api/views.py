@@ -1,0 +1,363 @@
+"""Vistas async: DRF vanilla no soporta `async def` en class-based
+views, se usa `adrf` (async support para DRF). El Service Layer sigue
+siendo sync (el ORM de Django lo es), así que cada llamada al Service
+se envuelve con `sync_to_async` (core/async_support/bridge.py) para no
+bloquear el event loop mientras espera la DB."""
+from adrf.generics import GenericAPIView as AsyncGenericAPIView
+from adrf.views import APIView as AsyncAPIView
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+
+from accounts.models import Role, User
+from accounts.permissions import IsAdmin, IsOwnerOrAssignedTechnicianOrAdmin
+from core.async_support.bridge import to_async
+from core.async_support.mixins import LoopRegisteringMixin
+from core.specifications.base import AlwaysTrueSpecification
+from rest_framework import permissions, status
+from rest_framework.response import Response
+from tickets.models import TicketStatus
+from tickets.api.serializers import (
+    DashboardSummarySerializer,
+    TicketAssignSerializer,
+    TicketCloseSerializer,
+    TicketCommentCreateSerializer,
+    TicketCommentSerializer,
+    TicketCreateSerializer,
+    TicketDetailSerializer,
+    TicketListSerializer,
+    TicketStatusChangeSerializer,
+    TicketTimeLogCreateSerializer,
+    TicketTimeLogSerializer,
+)
+from tickets.services.dashboard_service import DashboardService
+from tickets.services.ticket_service import TicketService
+from tickets.specifications.ticket_specs import (
+    TicketAssignedToSpec,
+    TicketByCategorySpec,
+    TicketByPrioritySpec,
+    TicketByStatusSpec,
+    TicketRequestedBySpec,
+    TicketSearchTextSpec,
+    TicketUnassignedSpec,
+)
+
+
+def _scope_by_role_spec(user):
+    """RBAC a nivel de datos: Usuario ve solo lo suyo, Técnico ve lo
+    asignado, Admin ve todo. Construido con Specification Pattern."""
+    if user.role == Role.ADMIN or user.is_superuser:
+        return AlwaysTrueSpecification()
+    if user.role == Role.TECNICO:
+        return TicketAssignedToSpec(user.id)
+    return TicketRequestedBySpec(user.id)
+
+
+def _build_filter_spec(query_params):
+    spec = AlwaysTrueSpecification()
+    if status_ := query_params.get("status"):
+        spec = spec & TicketByStatusSpec(status_)
+    if priority := query_params.get("priority"):
+        spec = spec & TicketByPrioritySpec(priority)
+    if category := query_params.get("category"):
+        spec = spec & TicketByCategorySpec(category)
+    if search := query_params.get("search"):
+        spec = spec & TicketSearchTextSpec(search)
+    return spec
+
+
+def _list_tickets_sync(user, query_params):
+    """Corre en threadpool: evalúa el queryset (I/O de DB) y lo
+    materializa a lista de dicts vía serializer, todo dentro del mismo
+    thread (thread_sensitive) porque el ORM lo exige."""
+    service = TicketService()
+    role_spec = _scope_by_role_spec(user)
+    filter_spec = _build_filter_spec(query_params)
+    queryset = service.list_tickets(role_spec & filter_spec)
+    return list(queryset)
+
+
+def _list_available_tickets_sync(query_params):
+    """Tickets ABIERTO y sin técnico asignado: el pool de trabajo que
+    cualquier Técnico puede tomar. No aplica scoping por dueño/asignado
+    porque, por definición, todavía no tienen asignado a nadie."""
+    service = TicketService()
+    filter_spec = TicketUnassignedSpec() & TicketByStatusSpec(TicketStatus.ABIERTO)
+    filter_spec = filter_spec & _build_filter_spec(query_params)
+    return list(service.list_tickets(filter_spec))
+
+
+def _get_ticket_sync(ticket_id: int):
+    """Corre en threadpool: obtiene el ticket y fuerza evaluación de
+    relaciones (comments, time_logs, attachments) ANTES de salir del
+    thread sync, porque el serializer las recorre fuera de él."""
+    ticket = TicketService().get_ticket(ticket_id)
+    list(ticket.comments.all())
+    list(ticket.time_logs.all())
+    list(ticket.attachments.all())
+    return ticket
+
+
+def _serialize_detail_sync(ticket) -> dict:
+    """Serializa a dict plano DENTRO del thread sync (recorre
+    relaciones lazy), para que la vista async solo maneje datos ya
+    materializados."""
+    list(ticket.comments.all())
+    list(ticket.time_logs.all())
+    list(ticket.attachments.all())
+    return TicketDetailSerializer(ticket).data
+
+
+class TicketListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = TicketListSerializer
+
+    @extend_schema(
+        summary="Listar tickets (scoped por rol)",
+        description=(
+            "Usuario ve solo sus tickets, Técnico ve los asignados, "
+            "Admin ve todos. Filtros combinables vía Specification Pattern."
+        ),
+        parameters=[
+            OpenApiParameter("status", str, description="Filtrar por estado exacto"),
+            OpenApiParameter("priority", str, description="Filtrar por prioridad exacta"),
+            OpenApiParameter("category", str, description="Filtrar por categoría exacta"),
+            OpenApiParameter("search", str, description="Búsqueda en título/descripción/código"),
+        ],
+        responses=TicketListSerializer(many=True),
+    )
+    async def get(self, request):
+        tickets = await to_async(_list_tickets_sync)(request.user, request.query_params)
+        page = self.paginate_queryset(tickets)
+        serializer = TicketListSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @extend_schema(
+        summary="Crear ticket",
+        description="Prioridad se infiere de la categoría si no se especifica (Factory Pattern).",
+        request=TicketCreateSerializer,
+        responses={201: TicketDetailSerializer},
+    )
+    async def post(self, request):
+        serializer = TicketCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        create_ticket = to_async(TicketService().create_ticket)
+        ticket = await create_ticket(requester=request.user, **serializer.validated_data)
+
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(ticket)
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class TicketAvailableListView(LoopRegisteringMixin, AsyncGenericAPIView):
+    """Pool de tickets ABIERTO sin técnico asignado — lo que un
+    Técnico puede tomar (self-assign). Solo rol Técnico, cualquiera
+    puede ver este pool (no hay dueño todavía)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = TicketListSerializer
+
+    @extend_schema(
+        summary="Listar tickets disponibles para tomar (sin asignar)",
+        description="Tickets en estado ABIERTO sin técnico asignado. Cualquier Técnico puede tomarlos.",
+        responses=TicketListSerializer(many=True),
+    )
+    async def get(self, request):
+        if request.user.role != Role.TECNICO and not request.user.is_superuser:
+            return Response(
+                {"detail": "Solo un Técnico puede ver el pool de tickets disponibles."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tickets = await to_async(_list_available_tickets_sync)(request.query_params)
+        page = self.paginate_queryset(tickets)
+        serializer = TicketListSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+
+class TicketTakeView(LoopRegisteringMixin, AsyncAPIView):
+    """Un Técnico toma (self-assign) un ticket sin asignar. Distinto de
+    TicketAssignView (que es un Admin asignando a un tercero)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(
+        summary="Tomar ticket sin asignar (Técnico)",
+        description=(
+            "El propio Técnico se auto-asigna un ticket en estado ABIERTO "
+            "y sin técnico asignado. Pasa a ASIGNADO. Usa select_for_update "
+            "para evitar que dos técnicos tomen el mismo ticket a la vez."
+        ),
+        request=None,
+        responses=TicketDetailSerializer,
+    )
+    async def post(self, request, ticket_id: int):
+        self_assign = to_async(TicketService().self_assign)
+        ticket = await self_assign(ticket_id=ticket_id, technician=request.user)
+
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(ticket)
+        return Response(data)
+
+
+class TicketDetailView(LoopRegisteringMixin, AsyncAPIView):
+    permission_classes = (permissions.IsAuthenticated, IsOwnerOrAssignedTechnicianOrAdmin)
+
+    @extend_schema(
+        summary="Detalle de ticket",
+        description="Incluye comentarios, tiempo trabajado y adjuntos.",
+        responses=TicketDetailSerializer,
+    )
+    async def get(self, request, ticket_id: int):
+        get_ticket = to_async(_get_ticket_sync)
+        ticket = await get_ticket(ticket_id)
+        self.check_object_permissions(request, ticket)
+
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(ticket)
+        return Response(data)
+
+
+class TicketAssignView(LoopRegisteringMixin, AsyncAPIView):
+    """Solo Admin asigna técnico (regla de negocio del rol Administrador)."""
+
+    permission_classes = (IsAdmin,)
+
+    @extend_schema(
+        summary="Asignar técnico (solo Admin)",
+        request=TicketAssignSerializer,
+        responses=TicketDetailSerializer,
+    )
+    async def post(self, request, ticket_id: int):
+        serializer = TicketAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        get_user = to_async(User.objects.get)
+        technician = await get_user(pk=serializer.validated_data["technician_id"])
+
+        assign = to_async(TicketService().assign_technician)
+        ticket = await assign(ticket_id=ticket_id, technician=technician, actor=request.user)
+
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(ticket)
+        return Response(data)
+
+
+class TicketStatusChangeView(LoopRegisteringMixin, AsyncAPIView):
+    permission_classes = (permissions.IsAuthenticated, IsOwnerOrAssignedTechnicianOrAdmin)
+
+    @extend_schema(
+        summary="Cambiar estado de ticket",
+        description="Transición validada por Strategy Pattern según estado actual y rol del actor.",
+        request=TicketStatusChangeSerializer,
+        responses=TicketDetailSerializer,
+    )
+    async def post(self, request, ticket_id: int):
+        get_ticket = to_async(_get_ticket_sync)
+        ticket = await get_ticket(ticket_id)
+        self.check_object_permissions(request, ticket)
+
+        serializer = TicketStatusChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        change_status = to_async(TicketService().change_status)
+        updated = await change_status(
+            ticket_id=ticket_id, new_status=serializer.validated_data["status"], actor=request.user
+        )
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(updated)
+        return Response(data)
+
+
+class TicketCloseView(LoopRegisteringMixin, AsyncAPIView):
+    """Cierre exige nota de resolución (requisito explícito de Técnico)."""
+
+    permission_classes = (permissions.IsAuthenticated, IsOwnerOrAssignedTechnicianOrAdmin)
+
+    @extend_schema(
+        summary="Cerrar ticket",
+        description="Requiere nota de resolución no vacía. Solo válido desde estado RESUELTO.",
+        request=TicketCloseSerializer,
+        responses=TicketDetailSerializer,
+    )
+    async def post(self, request, ticket_id: int):
+        get_ticket = to_async(_get_ticket_sync)
+        ticket = await get_ticket(ticket_id)
+        self.check_object_permissions(request, ticket)
+
+        serializer = TicketCloseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        close_ticket = to_async(TicketService().close_ticket)
+        updated = await close_ticket(
+            ticket_id=ticket_id,
+            resolution_notes=serializer.validated_data["resolution_notes"],
+            actor=request.user,
+        )
+        serialize = to_async(_serialize_detail_sync)
+        data = await serialize(updated)
+        return Response(data)
+
+
+class TicketCommentListCreateView(LoopRegisteringMixin, AsyncAPIView):
+    permission_classes = (permissions.IsAuthenticated, IsOwnerOrAssignedTechnicianOrAdmin)
+
+    @extend_schema(
+        summary="Agregar comentario a ticket",
+        request=TicketCommentCreateSerializer,
+        responses={201: TicketCommentSerializer},
+    )
+    async def post(self, request, ticket_id: int):
+        get_ticket = to_async(_get_ticket_sync)
+        ticket = await get_ticket(ticket_id)
+        self.check_object_permissions(request, ticket)
+
+        serializer = TicketCommentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        add_comment = to_async(TicketService().add_comment)
+        comment = await add_comment(
+            ticket_id=ticket_id, author=request.user, body=serializer.validated_data["body"]
+        )
+        return Response(TicketCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
+
+class TicketTimeLogListCreateView(LoopRegisteringMixin, AsyncAPIView):
+    """Solo Técnico registra tiempo trabajado (requisito explícito)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(
+        summary="Registrar tiempo trabajado (solo Técnico asignado)",
+        request=TicketTimeLogCreateSerializer,
+        responses={201: TicketTimeLogSerializer},
+    )
+    async def post(self, request, ticket_id: int):
+        serializer = TicketTimeLogCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        log_time = to_async(TicketService().log_time)
+        log = await log_time(
+            ticket_id=ticket_id, technician=request.user, **serializer.validated_data
+        )
+        return Response(TicketTimeLogSerializer(log).data, status=status.HTTP_201_CREATED)
+
+
+class DashboardSummaryView(LoopRegisteringMixin, AsyncAPIView):
+    """Dashboard ejecutivo: solo Admin (requisito explícito del rol).
+    Agregaciones (Count/Avg) corren en threadpool vía sync_to_async,
+    igual que el resto de vistas — el ORM sigue siendo sync."""
+
+    permission_classes = (IsAdmin,)
+
+    @extend_schema(
+        summary="Dashboard ejecutivo (solo Admin)",
+        description=(
+            "KPIs agregados: conteo por estado/prioridad/categoría, "
+            "tiempo promedio de resolución por prioridad, y tickets "
+            "vencidos por SLA (configurado en settings.TICKET_SLA_HOURS)."
+        ),
+        responses=DashboardSummarySerializer,
+    )
+    async def get(self, request):
+        get_summary = to_async(DashboardService().get_summary)
+        summary = await get_summary()
+        return Response(DashboardSummarySerializer(summary).data)

@@ -1,0 +1,92 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Django
+*.sqlite3
+db.sqlite3
+test_db.sqlite3
+/media/
+/staticfiles/
+/static/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Cache & linters
+.mypy_cache/
+.ruff_cache/
+.pylint/
+.isort.dont_diff
+
+# OS
+Thumbs.db
+
+# Project specific
+/tmp/
+/temp/
+*.pid
+celerybeat-schedule
+*.log
+*.pot
+
+# IDE/Editor specifics
+*.sublime-project
+*.sublime-workspace
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.#*
+
+# Database backups
+*.db.backup
+*.sql
