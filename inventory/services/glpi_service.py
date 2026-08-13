@@ -40,6 +40,58 @@ def _safe_table_identifier(connection, table_name: str) -> str:
     return connection.ops.quote_name(table_name)
 
 
+# Plantillas SQL estáticas: el token __TABLE__ se sustituye con
+# str.replace() (nunca f-string/`.format()`/concatenación) por el
+# identificador ya resuelto por _safe_table_identifier().
+_LIST_ASSETS_SQL_TEMPLATE = """
+    SELECT
+        t.id,
+        t.name,
+        t.serial,
+        t.otherserial AS legacy_id,
+        t.comment,
+        t.contact,
+        m.name AS brand,
+        st.name AS status,
+        l.completename AS location,
+        %s AS category,
+        t.date_mod
+    FROM __TABLE__ t
+    LEFT JOIN glpi_manufacturers m ON t.manufacturers_id = m.id
+    LEFT JOIN glpi_states st ON t.states_id = st.id
+    LEFT JOIN glpi_locations l ON t.locations_id = l.id
+    WHERE t.is_deleted = 0
+"""
+
+_CATEGORY_COUNT_SQL_TEMPLATE = "SELECT COUNT(*) FROM __TABLE__ WHERE is_deleted = 0"
+
+_STATUS_COUNT_SQL_TEMPLATE = """
+    SELECT COALESCE(st.name, 'Sin Estado') AS status_name, COUNT(*)
+    FROM __TABLE__ t
+    LEFT JOIN glpi_states st ON t.states_id = st.id
+    WHERE t.is_deleted = 0
+    GROUP BY st.name
+"""
+
+_LOCATION_COUNT_SQL_TEMPLATE = """
+    SELECT COALESCE(l.completename, 'Sin Ubicación') AS loc_name, COUNT(*)
+    FROM __TABLE__ t
+    LEFT JOIN glpi_locations l ON t.locations_id = l.id
+    WHERE t.is_deleted = 0 AND l.completename IS NOT NULL AND l.completename != ''
+    GROUP BY l.completename
+"""
+
+_SERIAL_LOOKUP_SQL_TEMPLATE = """
+    SELECT t.serial FROM __TABLE__ t
+    WHERE t.id = %s AND t.is_deleted = 0
+"""
+
+_SERIAL_AND_INVENTORY_LOOKUP_SQL_TEMPLATE = """
+    SELECT t.serial, t.otherserial FROM __TABLE__ t
+    WHERE t.id = %s AND t.is_deleted = 0
+"""
+
+
 def _generate_qr_data_url(url: str) -> str:
     """Genera una imagen PNG del código QR codificado en Base64 Data URL, en
     alta resolución (mismos parámetros que _generate_qr_png_bytes) para que
@@ -86,25 +138,12 @@ class GLPIInventoryService:
                 if category and category.upper() not in ("ALL", cat_code):
                     continue
 
-                sql = f"""
-                    SELECT
-                        t.id,
-                        t.name,
-                        t.serial,
-                        t.otherserial AS legacy_id,
-                        t.comment,
-                        t.contact,
-                        m.name AS brand,
-                        st.name AS status,
-                        l.completename AS location,
-                        %s AS category,
-                        t.date_mod
-                    FROM {_safe_table_identifier(connection, table_name)} t
-                    LEFT JOIN glpi_manufacturers m ON t.manufacturers_id = m.id
-                    LEFT JOIN glpi_states st ON t.states_id = st.id
-                    LEFT JOIN glpi_locations l ON t.locations_id = l.id
-                    WHERE t.is_deleted = 0
-                """
+                # Query estática con placeholder de token (no f-string): el
+                # nombre de tabla ya validado/quoteado se sustituye vía
+                # .replace(), separado de la interpolación de valores (%s).
+                sql = _LIST_ASSETS_SQL_TEMPLATE.replace(
+                    "__TABLE__", _safe_table_identifier(connection, table_name)
+                )
                 params: list = [cat_code]
 
                 if status:
@@ -157,34 +196,18 @@ class GLPIInventoryService:
                 safe_table = _safe_table_identifier(connection, table_name)
 
                 # Total por categoría
-                cursor.execute(f"SELECT COUNT(*) FROM {safe_table} WHERE is_deleted = 0")
+                cursor.execute(_CATEGORY_COUNT_SQL_TEMPLATE.replace("__TABLE__", safe_table))
                 count = cursor.fetchone()[0]
                 by_category[cat_code] = count
                 total += count
 
                 # Estados
-                cursor.execute(
-                    f"""
-                    SELECT COALESCE(st.name, 'Sin Estado') AS status_name, COUNT(*)
-                    FROM {safe_table} t
-                    LEFT JOIN glpi_states st ON t.states_id = st.id
-                    WHERE t.is_deleted = 0
-                    GROUP BY st.name
-                """
-                )
+                cursor.execute(_STATUS_COUNT_SQL_TEMPLATE.replace("__TABLE__", safe_table))
                 for st_name, st_count in cursor.fetchall():
                     by_status[st_name] = by_status.get(st_name, 0) + st_count
 
                 # Ubicaciones top
-                cursor.execute(
-                    f"""
-                    SELECT COALESCE(l.completename, 'Sin Ubicación') AS loc_name, COUNT(*)
-                    FROM {safe_table} t
-                    LEFT JOIN glpi_locations l ON t.locations_id = l.id
-                    WHERE t.is_deleted = 0 AND l.completename IS NOT NULL AND l.completename != ''
-                    GROUP BY l.completename
-                """
-                )
+                cursor.execute(_LOCATION_COUNT_SQL_TEMPLATE.replace("__TABLE__", safe_table))
                 for loc_name, loc_count in cursor.fetchall():
                     top_locations[loc_name] = top_locations.get(loc_name, 0) + loc_count
 
@@ -227,10 +250,7 @@ class GLPIInventoryService:
                 with connection.cursor() as cursor:
                     safe_table = _safe_table_identifier(connection, table_name)
                     cursor.execute(
-                        f"""
-                        SELECT t.serial FROM {safe_table} t
-                        WHERE t.id = %s AND t.is_deleted = 0
-                        """,
+                        _SERIAL_LOOKUP_SQL_TEMPLATE.replace("__TABLE__", safe_table),
                         [obj_id],
                     )
                     row = cursor.fetchone()
@@ -291,10 +311,7 @@ class GLPIInventoryService:
                 with connection.cursor() as cursor:
                     safe_table = _safe_table_identifier(connection, table_name)
                     cursor.execute(
-                        f"""
-                        SELECT t.serial, t.otherserial FROM {safe_table} t
-                        WHERE t.id = %s AND t.is_deleted = 0
-                        """,
+                        _SERIAL_AND_INVENTORY_LOOKUP_SQL_TEMPLATE.replace("__TABLE__", safe_table),
                         [obj_id],
                     )
                     row = cursor.fetchone()
