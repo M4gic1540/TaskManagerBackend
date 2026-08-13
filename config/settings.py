@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     # 3rd party
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "adrf",
     "drf_spectacular",
     "corsheaders",
@@ -83,30 +84,34 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 # --- Databases (default: SQLite local; glpi: MariaDB remota de solo lectura) ---
 IS_TESTING = "pytest" in sys.modules or "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+SQLITE_ENGINE = "django.db.backends.sqlite3"
 
 if IS_TESTING:
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.sqlite3",
+            "ENGINE": SQLITE_ENGINE,
             "NAME": BASE_DIR / "test_db.sqlite3",
         },
         "glpi": {
-            "ENGINE": "django.db.backends.sqlite3",
+            "ENGINE": SQLITE_ENGINE,
             "NAME": BASE_DIR / "test_db.sqlite3",
         },
     }
 else:
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.sqlite3",
+            "ENGINE": SQLITE_ENGINE,
             "NAME": BASE_DIR / "db.sqlite3",
         },
         "glpi": {
+            # Sin defaults para host/user/password: si no están en el .env,
+            # falla explícito (UndefinedValueError) en vez de intentar
+            # conectarse en silencio a una IP interna hardcodeada.
             "ENGINE": config("DB_ENGINE", default="django.db.backends.mysql"),
             "NAME": config("DB_NAME", default="glpi"),
-            "USER": config("DB_USER", default="glpiselect"),
-            "PASSWORD": config("DB_PASSWORD", default=""),
-            "HOST": config("DB_HOST", default="10.0.0.100"),
+            "USER": config("DB_USER"),
+            "PASSWORD": config("DB_PASSWORD"),
+            "HOST": config("DB_HOST"),
             "PORT": config("DB_PORT", default="3306"),
             "OPTIONS": {
                 "charset": "utf8mb4",
