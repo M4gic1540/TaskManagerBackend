@@ -26,6 +26,19 @@ TABLE_MAPPING = [
     ("glpi_phones", "TELEFONO", "phone.form.php"),
 ]
 
+# Los nombres de tabla no se pueden pasar como bind parameter (%s) en SQL:
+# el driver solo parametriza valores, no identificadores. Se valida contra
+# esta whitelist -derivada de TABLE_MAPPING, nunca de input externo- y se
+# resuelve a un nombre ya quoteado antes de interpolarlo en la query, para
+# que no dependa de que el llamador nunca le pase texto arbitrario.
+_VALID_TABLE_NAMES = frozenset(name for name, _, _ in TABLE_MAPPING)
+
+
+def _safe_table_identifier(connection, table_name: str) -> str:
+    if table_name not in _VALID_TABLE_NAMES:
+        raise ValueError(f"Tabla no permitida: {table_name!r}")
+    return connection.ops.quote_name(table_name)
+
 
 def _generate_qr_data_url(url: str) -> str:
     """Genera una imagen PNG del código QR codificado en Base64 Data URL, en
@@ -60,20 +73,21 @@ class GLPIInventoryService:
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
         """Lista todos los activos desde MariaDB combinando las tablas de GLPI."""
+        # No confiar en el type hint en runtime: se castea y acota antes de
+        # usarlo como bind parameter, así un caller que pase algo no-numérico
+        # falla temprano con un ValueError en vez de silenciarlo en SQL.
+        safe_limit = max(1, min(int(limit), 1000))
         results: List[Dict[str, Any]] = []
         connection = connections[self.db_alias]
         glpi_base_url = getattr(settings, "GLPI_BASE_URL", "https://glpi.cmm.uchile.cl").rstrip("/")
 
         with connection.cursor() as cursor:
             for table_name, cat_code, form_page in TABLE_MAPPING:
-                if category and category.upper() != cat_code and category.upper() != "ALL":
-                    if category.upper() == "PC" and cat_code not in ("PC", "LAPTOP"):
-                        continue
-                    elif category.upper() != cat_code:
-                        continue
+                if category and category.upper() not in ("ALL", cat_code):
+                    continue
 
                 sql = f"""
-                    SELECT 
+                    SELECT
                         t.id,
                         t.name,
                         t.serial,
@@ -83,15 +97,15 @@ class GLPIInventoryService:
                         m.name AS brand,
                         st.name AS status,
                         l.completename AS location,
-                        '{cat_code}' AS category,
+                        %s AS category,
                         t.date_mod
-                    FROM {table_name} t
+                    FROM {_safe_table_identifier(connection, table_name)} t
                     LEFT JOIN glpi_manufacturers m ON t.manufacturers_id = m.id
                     LEFT JOIN glpi_states st ON t.states_id = st.id
                     LEFT JOIN glpi_locations l ON t.locations_id = l.id
                     WHERE t.is_deleted = 0
                 """
-                params: list = []
+                params: list = [cat_code]
 
                 if status:
                     sql += " AND LOWER(st.name) LIKE %s"
@@ -109,7 +123,8 @@ class GLPIInventoryService:
                     search_pattern = f"%{search.lower()}%"
                     params.extend([search_pattern] * 6)
 
-                sql += f" ORDER BY t.id DESC LIMIT {limit}"
+                sql += " ORDER BY t.id DESC LIMIT %s"
+                params.append(safe_limit)
 
                 cursor.execute(sql, params)
                 rows = self._dictfetchall(cursor)
@@ -139,8 +154,10 @@ class GLPIInventoryService:
 
         with connection.cursor() as cursor:
             for table_name, cat_code, _ in TABLE_MAPPING:
+                safe_table = _safe_table_identifier(connection, table_name)
+
                 # Total por categoría
-                cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE is_deleted = 0")
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_table} WHERE is_deleted = 0")
                 count = cursor.fetchone()[0]
                 by_category[cat_code] = count
                 total += count
@@ -148,8 +165,8 @@ class GLPIInventoryService:
                 # Estados
                 cursor.execute(
                     f"""
-                    SELECT COALESCE(st.name, 'Sin Estado') AS status_name, COUNT(*) 
-                    FROM {table_name} t
+                    SELECT COALESCE(st.name, 'Sin Estado') AS status_name, COUNT(*)
+                    FROM {safe_table} t
                     LEFT JOIN glpi_states st ON t.states_id = st.id
                     WHERE t.is_deleted = 0
                     GROUP BY st.name
@@ -161,8 +178,8 @@ class GLPIInventoryService:
                 # Ubicaciones top
                 cursor.execute(
                     f"""
-                    SELECT COALESCE(l.completename, 'Sin Ubicación') AS loc_name, COUNT(*) 
-                    FROM {table_name} t
+                    SELECT COALESCE(l.completename, 'Sin Ubicación') AS loc_name, COUNT(*)
+                    FROM {safe_table} t
                     LEFT JOIN glpi_locations l ON t.locations_id = l.id
                     WHERE t.is_deleted = 0 AND l.completename IS NOT NULL AND l.completename != ''
                     GROUP BY l.completename
@@ -208,9 +225,10 @@ class GLPIInventoryService:
                     continue
 
                 with connection.cursor() as cursor:
+                    safe_table = _safe_table_identifier(connection, table_name)
                     cursor.execute(
                         f"""
-                        SELECT t.serial FROM {table_name} t
+                        SELECT t.serial FROM {safe_table} t
                         WHERE t.id = %s AND t.is_deleted = 0
                         """,
                         [obj_id],
@@ -271,9 +289,10 @@ class GLPIInventoryService:
                     continue
 
                 with connection.cursor() as cursor:
+                    safe_table = _safe_table_identifier(connection, table_name)
                     cursor.execute(
                         f"""
-                        SELECT t.serial, t.otherserial FROM {table_name} t
+                        SELECT t.serial, t.otherserial FROM {safe_table} t
                         WHERE t.id = %s AND t.is_deleted = 0
                         """,
                         [obj_id],
