@@ -5,16 +5,16 @@ from __future__ import annotations
 import base64
 import io
 import math
-import re
 import zipfile
 from typing import Any, Dict, List, Optional
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 from django.db import connections
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm
+
+from inventory.services.qr_label import build_qr_label_image, sanitize_filename
 
 
 TABLE_MAPPING = [
@@ -28,12 +28,13 @@ TABLE_MAPPING = [
 
 
 def _generate_qr_data_url(url: str) -> str:
-    """Genera una imagen PNG del código QR codificado en Base64 Data URL (50x50px)."""
-    qr = qrcode.QRCode(version=1, box_size=2, border=1)
+    """Genera una imagen PNG del código QR codificado en Base64 Data URL, en
+    alta resolución (mismos parámetros que _generate_qr_png_bytes) para que
+    no se pixelee al imprimir la etiqueta física."""
+    qr = qrcode.QRCode(box_size=8, border=2)
     qr.add_data(url)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    img = img.resize((  50, 50))  # Ajustar tamaño a 90x90 píxeles
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
@@ -115,6 +116,10 @@ class GLPIInventoryService:
                 for r in rows:
                     r["id_str"] = f"{cat_code.lower()}_{r['id']}"
                     r["code"] = f"GLPI-{cat_code}-{r['id']}"
+                    # legacy_id viene de t.otherserial: el número de inventario
+                    # real cargado en GLPI (no `code`, que es sintético). Muchos
+                    # activos no lo tienen cargado, por eso puede quedar None.
+                    r["inventory_number"] = (r.get("legacy_id") or "").strip() or None
                     r["glpi_url"] = f"{glpi_base_url}/front/{form_page}?id={r['id']}"
                     r["qr_code_data"] = _generate_qr_data_url(r["glpi_url"])
 
@@ -248,61 +253,6 @@ class GLPIInventoryService:
         document.save(buffer)
         return buffer.getvalue()
 
-    def _load_font(self, size: int = 28):
-        """Carga una fuente disponible del sistema."""
-        font_candidates = [
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        ]
-        for path in font_candidates:
-            try:
-                return ImageFont.truetype(path, size)
-            except OSError:
-                continue
-        return ImageFont.load_default()
-
-    def _build_label_image(self, serial_number: str, target_url: str) -> io.BytesIO:
-        """Construye una imagen PNG de 100x100px con QR + S/N debajo."""
-        qr = qrcode.QRCode(
-            error_correction=qrcode.constants.ERROR_CORRECT_M,
-            box_size=2,
-            border=1,
-        )
-        qr.add_data(target_url)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-
-        # Redimensionar QR a 100x100px
-        qr_img = qr_img.resize((100, 100), Image.Resampling.LANCZOS)
-
-        # Canvas: 100px de ancho, 100px QR + 30px para S/N
-        canvas_width = 100
-        canvas_height = 130
-        canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
-        canvas.paste(qr_img, (0, 0))
-
-        # Dibujar el S/N debajo
-        draw = ImageDraw.Draw(canvas)
-        font = self._load_font(size=12)
-        text = serial_number.strip()
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_x = (canvas_width - text_width) / 2
-        text_y = 105
-        draw.text((text_x, text_y), text, fill="black", font=font)
-
-        buffer = io.BytesIO()
-        canvas.save(buffer, format="PNG")
-        buffer.seek(0)
-        return buffer
-
-    def _sanitize_filename(self, serial_number: str) -> str:
-        """Sanitiza el nombre de archivo."""
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", serial_number.strip())
-        return safe or "sin_sn"
-
     def generate_qr_images_zip(self, *, asset_ids: list[str]) -> bytes:
         """Genera un ZIP con imágenes PNG de QRs (QR + S/N).
         asset_ids es lista de strings formato 'pc_123' o 'monitor_45'."""
@@ -323,7 +273,7 @@ class GLPIInventoryService:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         f"""
-                        SELECT t.serial FROM {table_name} t
+                        SELECT t.serial, t.otherserial FROM {table_name} t
                         WHERE t.id = %s AND t.is_deleted = 0
                         """,
                         [obj_id],
@@ -333,6 +283,7 @@ class GLPIInventoryService:
                         glpi_url = f"{glpi_base_url}/front/{form_page}?id={obj_id}"
                         assets_data.append({
                             "serial": row[0] or "SIN_SN",
+                            "inventory_number": (row[1] or "").strip() or None,
                             "glpi_url": glpi_url,
                         })
                 break
@@ -346,7 +297,7 @@ class GLPIInventoryService:
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             used_names = set()
             for asset in assets_data:
-                filename = f"{self._sanitize_filename(asset['serial'])}.png"
+                filename = f"{sanitize_filename(asset['serial'])}.png"
 
                 # Si el nombre ya existe, agregar sufijo
                 if filename in used_names:
@@ -357,7 +308,11 @@ class GLPIInventoryService:
                     filename = f"{base}_{suffix}.{ext}"
 
                 used_names.add(filename)
-                image_buffer = self._build_label_image(asset["serial"], asset["glpi_url"])
+                image_buffer = build_qr_label_image(
+                    target_url=asset["glpi_url"],
+                    serial_number=asset["serial"],
+                    inventory_number=asset["inventory_number"],
+                )
                 zip_file.writestr(filename, image_buffer.getvalue())
 
         zip_buffer.seek(0)
