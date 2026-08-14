@@ -13,6 +13,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
         token["role"] = user.role
         token["username"] = user.username
+        # Usado por tickets (self_assign) para no dejar auto-tomar tickets
+        # a un técnico desactivado, sin que tickets tenga que consultar
+        # la BD de accounts para saberlo (core/auth/jwt_claims_authentication.py).
+        token["is_active_technician"] = user.is_active_technician
         return token
 
 

@@ -1,11 +1,9 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from accounts.enums import Role
 
-class Role(models.TextChoices):
-    ADMIN = "ADMIN", "Administrador"
-    TECNICO = "TECNICO", "Técnico"
-    USUARIO = "USUARIO", "Usuario"
+__all__ = ["Role", "User"]
 
 
 class User(AbstractUser):

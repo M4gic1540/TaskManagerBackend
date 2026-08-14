@@ -1,0 +1,116 @@
+# Orquesta los 4 microservicios (accounts, tickets, inventory, gateway)
+# localmente, reusando el mismo Dockerfile parametrizado por
+# SERVICE_SETTINGS. Jenkins/SonarQube quedan fuera de este compose —
+# siguen gestionados aparte, contra el monolito (`docker build .` sin
+# build-arg, ver Dockerfile).
+#
+# Uso: copiar .env.example a .env, completar SECRET_KEY y las
+# credenciales GLPI_DB_*, y correr `docker compose up --build`.
+# El único puerto expuesto al host es el del gateway (8000): los 3
+# servicios internos solo son alcanzables dentro de la red del compose.
+
+services:
+  accounts:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.accounts
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.accounts
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,accounts}
+      ACCOUNTS_DB_NAME: /app/data/accounts_db.sqlite3
+    volumes:
+      - accounts_data:/app/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  tickets:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.tickets
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.tickets
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,tickets}
+      TICKETS_DB_NAME: /app/data/tickets_db.sqlite3
+    volumes:
+      - tickets_data:/app/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  inventory:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.inventory
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.inventory
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,inventory}
+      INVENTORY_DB_NAME: /app/data/inventory_db.sqlite3
+      # BD externa GLPI (MariaDB, solo lectura) — sin defaults inseguros,
+      # falla explícito si faltan en .env (mismo criterio que el monolito).
+      DB_HOST: ${GLPI_DB_HOST:?Falta GLPI_DB_HOST en .env}
+      DB_USER: ${GLPI_DB_USER:?Falta GLPI_DB_USER en .env}
+      DB_PASSWORD: ${GLPI_DB_PASSWORD:?Falta GLPI_DB_PASSWORD en .env}
+      DB_NAME: ${GLPI_DB_NAME:-glpi}
+      DB_PORT: ${GLPI_DB_PORT:-3306}
+      GLPI_BASE_URL: ${GLPI_BASE_URL:-https://glpi.cmm.uchile.cl}
+      GLPI_BREAKER_FAIL_MAX: ${GLPI_BREAKER_FAIL_MAX:-5}
+      GLPI_BREAKER_RESET_TIMEOUT: ${GLPI_BREAKER_RESET_TIMEOUT:-30}
+    volumes:
+      - inventory_data:/app/data
+      - inventory_media:/app/media
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  gateway:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.gateway
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.gateway
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,gateway}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      ACCOUNTS_SERVICE_URL: http://accounts:8000
+      TICKETS_SERVICE_URL: http://tickets:8000
+      INVENTORY_SERVICE_URL: http://inventory:8000
+      GATEWAY_UPSTREAM_TIMEOUT: ${GATEWAY_UPSTREAM_TIMEOUT:-10}
+    ports:
+      - "8000:8000"
+    depends_on:
+      accounts:
+        condition: service_healthy
+      tickets:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend:
+
+volumes:
+  accounts_data:
+  tickets_data:
+  inventory_data:
+  inventory_media:

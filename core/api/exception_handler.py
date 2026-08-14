@@ -13,6 +13,7 @@ from core.exceptions import (
     PermissionDeniedError,
     ValidationError,
 )
+from core.resilience.circuit_breaker import GLPIUnavailableError
 from core.tracing.context import get_request_id
 
 logger = logging.getLogger("ticketera")
@@ -22,6 +23,7 @@ _STATUS_MAP = {
     PermissionDeniedError: status.HTTP_403_FORBIDDEN,
     InvalidStateTransitionError: status.HTTP_409_CONFLICT,
     ValidationError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    GLPIUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 

@@ -1,10 +1,20 @@
 """Tests de self_assign (Técnico toma ticket sin asignar). Usa DB real
 (pytest-django) porque el método usa `select_for_update()` — igual que
-DashboardService/UserService, fakear el locking testearía una
-reimplementación manual, no el comportamiento real."""
+DashboardService, fakear el locking testearía una reimplementación
+manual, no el comportamiento real.
+
+Los actores (requester/technician) son objetos livianos, no
+`accounts.models.User`: TicketService ya no toca ninguna tabla de
+usuarios (microservicio con BD separada — ver
+core/auth/jwt_claims_authentication.py), así que este test corre igual
+bajo el monolito (config.settings) y bajo el servicio de tickets
+aislado (config.service_settings.tickets, sin `accounts` instalado)."""
+from itertools import count
+from types import SimpleNamespace
+
 import pytest
 
-from accounts.models import Role, User
+from accounts.enums import Role
 from core.events.base import EventBus
 from core.exceptions import (
     InvalidStateTransitionError,
@@ -16,6 +26,15 @@ from tickets.services.ticket_service import TicketService
 
 pytestmark = pytest.mark.django_db
 
+_next_id = count(1)
+
+
+def _actor(role, *, is_active_technician=True):
+    n = next(_next_id)
+    return SimpleNamespace(
+        id=n, username=f"user{n}", role=role, is_active_technician=is_active_technician,
+    )
+
 
 @pytest.fixture(autouse=True)
 def _reset_event_bus():
@@ -26,19 +45,20 @@ def _reset_event_bus():
 
 @pytest.fixture
 def requester():
-    return User.objects.create_user(username="req1", password="x", role=Role.USUARIO)
+    return _actor(Role.USUARIO)
 
 
 @pytest.fixture
 def technician():
-    return User.objects.create_user(username="tech1", password="x", role=Role.TECNICO)
+    return _actor(Role.TECNICO)
 
 
 @pytest.fixture
 def unassigned_ticket(requester):
     return Ticket.objects.create(
         title="Ticket sin asignar", description="d", category=TicketCategory.HARDWARE,
-        priority=TicketPriority.MEDIA, status=TicketStatus.ABIERTO, requester=requester,
+        priority=TicketPriority.MEDIA, status=TicketStatus.ABIERTO,
+        requester_id=requester.id, requester_username=requester.username,
     )
 
 
@@ -54,12 +74,11 @@ class TestSelfAssign:
 
     def test_deactivated_technician_cannot_take_ticket(self, technician, unassigned_ticket):
         technician.is_active_technician = False
-        technician.save(update_fields=["is_active_technician"])
         with pytest.raises(PermissionDeniedError):
             TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=technician)
 
     def test_cannot_take_already_assigned_ticket(self, technician, unassigned_ticket):
-        other_tech = User.objects.create_user(username="tech2", password="x", role=Role.TECNICO)
+        other_tech = _actor(Role.TECNICO)
         TicketService().self_assign(ticket_id=unassigned_ticket.id, technician=other_tech)
 
         with pytest.raises(ValidationError):

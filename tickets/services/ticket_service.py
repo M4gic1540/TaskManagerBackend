@@ -6,7 +6,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import Role
+from accounts.enums import Role
 from core.events.base import EventBus
 from core.exceptions import InvalidStateTransitionError, PermissionDeniedError, ValidationError
 from tickets.events import TicketAssigned, TicketCommented, TicketCreated, TicketStatusChanged
@@ -41,19 +41,27 @@ class TicketService:
 
     # --- Asignación (solo Admin) ---------------------------------------
     @transaction.atomic
-    def assign_technician(self, *, ticket_id: int, technician, actor) -> Ticket:
+    def assign_technician(
+        self, *, ticket_id: int, technician_id: int, technician_username: str, actor
+    ) -> Ticket:
+        """`technician_id`/`technician_username` vienen del payload (el
+        Admin ya los obtuvo de GET /technicians/ en accounts) — no se
+        valida contra la BD que ese id efectivamente tenga rol Técnico,
+        porque este servicio no tiene acceso a la tabla de usuarios
+        (trade-off aceptado de la separación de BD por microservicio)."""
         if actor.role != Role.ADMIN and not actor.is_superuser:
             raise PermissionDeniedError("Solo un Administrador puede asignar técnicos.")
-        if technician.role != Role.TECNICO:
-            raise ValidationError("El usuario asignado debe tener rol Técnico.")
 
         ticket = self.repository.get_by_id(ticket_id)
         ticket = self.repository.update(
-            ticket, assigned_technician=technician, status=TicketStatus.ASIGNADO
+            ticket,
+            assigned_technician_id=technician_id,
+            assigned_technician_username=technician_username,
+            status=TicketStatus.ASIGNADO,
         )
 
         EventBus.publish(TicketAssigned(
-            ticket_id=ticket.id, technician_id=technician.id, assigned_by_id=actor.id,
+            ticket_id=ticket.id, technician_id=technician_id, assigned_by_id=actor.id,
         ))
         return ticket
 
@@ -77,7 +85,10 @@ class TicketService:
             )
 
         ticket = self.repository.update(
-            ticket, assigned_technician=technician, status=TicketStatus.ASIGNADO
+            ticket,
+            assigned_technician_id=technician.id,
+            assigned_technician_username=technician.username,
+            status=TicketStatus.ASIGNADO,
         )
 
         EventBus.publish(TicketAssigned(

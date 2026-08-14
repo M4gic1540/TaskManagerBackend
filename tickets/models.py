@@ -1,8 +1,14 @@
 """Modelos de dominio de Tickets. Estados y transiciones válidas se
-resuelven vía Strategy Pattern en tickets/strategies/, no aquí."""
+resuelven vía Strategy Pattern en tickets/strategies/, no aquí.
+
+Los campos de usuario (requester, assigned_technician, author, etc.) NO
+son ForeignKey a accounts.User: este servicio no tiene la tabla de
+usuarios en su propia BD (microservicio con BD separada). Se guarda un
+par id+username denormalizado, poblado desde los claims del JWT del
+actor (o del payload de asignación) en el momento de la escritura —
+ver core/auth/jwt_claims_authentication.py."""
 import uuid
 
-from django.conf import settings
 from django.db import models
 
 
@@ -49,16 +55,10 @@ class Ticket(models.Model):
         max_length=20, choices=TicketStatus.choices, default=TicketStatus.ABIERTO, db_index=True
     )
 
-    requester = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="tickets_created"
-    )
-    assigned_technician = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="tickets_assigned",
-    )
+    requester_id = models.PositiveBigIntegerField()
+    requester_username = models.CharField(max_length=150)
+    assigned_technician_id = models.PositiveBigIntegerField(null=True, blank=True)
+    assigned_technician_username = models.CharField(max_length=150, blank=True, default="")
 
     resolution_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -69,8 +69,8 @@ class Ticket(models.Model):
         db_table = "tickets_ticket"
         indexes = [
             models.Index(fields=["status", "priority"]),
-            models.Index(fields=["assigned_technician", "status"]),
-            models.Index(fields=["requester"]),
+            models.Index(fields=["assigned_technician_id", "status"]),
+            models.Index(fields=["requester_id"]),
         ]
         ordering = ["-created_at"]
 
@@ -80,7 +80,8 @@ class Ticket(models.Model):
 
 class TicketComment(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="comments")
-    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    author_id = models.PositiveBigIntegerField()
+    author_username = models.CharField(max_length=150)
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -91,7 +92,8 @@ class TicketComment(models.Model):
 
 class TicketAttachment(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
-    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    uploaded_by_id = models.PositiveBigIntegerField()
+    uploaded_by_username = models.CharField(max_length=150)
     file = models.FileField(upload_to="ticket_attachments/%Y/%m/")
     original_filename = models.CharField(max_length=255)
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -105,7 +107,8 @@ class TicketTimeLog(models.Model):
     """Tiempo trabajado por técnico (requerimiento explícito de rol Técnico)."""
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="time_logs")
-    technician = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    technician_id = models.PositiveBigIntegerField()
+    technician_username = models.CharField(max_length=150)
     minutes_spent = models.PositiveIntegerField()
     notes = models.CharField(max_length=255, blank=True)
     logged_at = models.DateTimeField(auto_now_add=True)

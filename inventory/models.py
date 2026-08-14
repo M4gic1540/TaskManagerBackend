@@ -1,8 +1,12 @@
 """Modelo de dominio de Inventario. Reemplaza GLPI: activos propios +
-QR con vista pública de detalle (impresa en etiqueta física)."""
+QR con vista pública de detalle (impresa en etiqueta física).
+
+Los campos de usuario (responsible, created_by, changed_by) NO son
+ForeignKey a accounts.User: este servicio no tiene la tabla de usuarios
+en su propia BD (microservicio con BD separada). Se guarda un par
+id+username denormalizado — ver core/auth/jwt_claims_authentication.py."""
 import uuid
 
-from django.conf import settings
 from django.db import models
 
 
@@ -48,13 +52,8 @@ class Asset(models.Model):
     model = models.CharField(max_length=100, blank=True)
 
     location = models.CharField(max_length=150, blank=True, help_text="Ej: Piso 2 - Oficina 204")
-    responsible = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="assets_responsible",
-    )
+    responsible_id = models.PositiveBigIntegerField(null=True, blank=True)
+    responsible_username = models.CharField(max_length=150, blank=True, default="")
 
     purchase_date = models.DateField(null=True, blank=True)
     warranty_until = models.DateField(null=True, blank=True)
@@ -76,12 +75,8 @@ class Asset(models.Model):
 
     qr_image = models.ImageField(upload_to="asset_qr/%Y/%m/", blank=True, null=True)
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="assets_created",
-    )
+    created_by_id = models.PositiveBigIntegerField(null=True, blank=True)
+    created_by_username = models.CharField(max_length=150, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -101,7 +96,8 @@ class AssetHistory(models.Model):
     """Bitácora de cambios relevantes del activo (auditoría simple)."""
 
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="history")
-    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    changed_by_id = models.PositiveBigIntegerField(null=True, blank=True)
+    changed_by_username = models.CharField(max_length=150, blank=True, default="")
     action = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 

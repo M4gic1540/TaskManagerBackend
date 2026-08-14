@@ -15,7 +15,7 @@ class TicketTimeLogInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ("code", "title", "status", "priority", "category", "requester", "assigned_technician")
+    list_display = ("code", "title", "status", "priority", "category", "requester_username", "assigned_technician_username")
     list_filter = ("status", "priority", "category")
     search_fields = ("code", "title", "description")
     inlines = [TicketCommentInline, TicketTimeLogInline]
@@ -23,4 +23,4 @@ class TicketAdmin(admin.ModelAdmin):
 
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
-    list_display = ("ticket", "original_filename", "uploaded_by", "uploaded_at")
+    list_display = ("ticket", "original_filename", "uploaded_by_username", "uploaded_at")

@@ -14,7 +14,7 @@ class AssetRepository(DjangoRepository[Asset]):
     model = Asset
 
     def get_queryset(self) -> QuerySet[Asset]:
-        return super().get_queryset().select_related("responsible", "created_by")
+        return super().get_queryset()
 
     def get_by_uuid(self, public_uuid) -> Asset:
         try:
@@ -26,4 +26,9 @@ class AssetRepository(DjangoRepository[Asset]):
         return super().list(spec)
 
     def add_history(self, asset: Asset, changed_by, action: str) -> AssetHistory:
-        return AssetHistory.objects.create(asset=asset, changed_by=changed_by, action=action)
+        return AssetHistory.objects.create(
+            asset=asset,
+            changed_by_id=changed_by.id,
+            changed_by_username=changed_by.username,
+            action=action,
+        )

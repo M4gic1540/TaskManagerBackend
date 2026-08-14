@@ -25,7 +25,7 @@ class InventoryDashboardService:
             "total": Asset.objects.count(),
             "available_total": Asset.objects.exclude(status__in=_UNAVAILABLE_STATUSES).count(),
             "unassigned_responsible_total": Asset.objects.filter(
-                responsible__isnull=True
+                responsible_id__isnull=True
             ).exclude(status__in=_UNAVAILABLE_STATUSES).count(),
             "top_locations": self._top_locations(),
             "warranty": self._warranty_summary(),

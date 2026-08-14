@@ -32,5 +32,6 @@ class TicketFactory:
             "description": description.strip(),
             "category": category,
             "priority": resolved_priority,
-            "requester": requester,
+            "requester_id": requester.id,
+            "requester_username": requester.username,
         }

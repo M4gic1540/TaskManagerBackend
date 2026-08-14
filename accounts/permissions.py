@@ -3,7 +3,7 @@ vistas vía `permission_classes = [IsAdmin | IsTechnician]`.
 """
 from rest_framework.permissions import BasePermission
 
-from accounts.models import Role
+from accounts.enums import Role
 
 
 class IsAdmin(BasePermission):

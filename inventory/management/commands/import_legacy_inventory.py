@@ -1,13 +1,19 @@
 """Importa la planilla legacy de inventario (CSV o XLSX) directo por
 consola. Uso:
 
-    python manage.py import_legacy_inventory ruta/al/archivo.csv --username admin
+    python manage.py import_legacy_inventory ruta/al/archivo.csv --actor-id 1 --actor-username admin
 
 Hace lo mismo que POST /api/v1/inventory/import/, pero sin pasar por
-HTTP: útil para la migración inicial masiva desde el servidor."""
-from django.core.management.base import BaseCommand, CommandError
+HTTP: útil para la migración inicial masiva desde el servidor.
 
-from accounts.models import User
+Recibe el actor por id+username en vez de resolverlo contra una tabla
+`User` local: este servicio no tiene la tabla de usuarios en su propia
+BD (microservicio con BD separada) — ver accounts/api para consultar
+el id de un usuario existente."""
+from django.core.management.base import BaseCommand
+
+from accounts.enums import Role
+from core.auth.jwt_claims_authentication import TokenClaimsUser
 from inventory.import_mapping import row_to_asset_fields
 from inventory.import_parser import parse_uploaded_inventory_file
 from inventory.services.asset_service import AssetService
@@ -34,16 +40,14 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("path", type=str, help="Ruta al archivo .csv o .xlsx")
-        parser.add_argument("--username", type=str, required=True, help="Usuario que queda como autor de la importación")
+        parser.add_argument("--actor-id", type=int, required=True, help="Id del usuario que queda como autor de la importación")
+        parser.add_argument("--actor-username", type=str, required=True, help="Username del usuario que queda como autor de la importación")
 
     def handle(self, *args, **options):
         path = options["path"]
-        username = options["username"]
-
-        try:
-            actor = User.objects.get(username=username)
-        except User.DoesNotExist as exc:
-            raise CommandError(f"Usuario '{username}' no existe.") from exc
+        actor = TokenClaimsUser(
+            id=options["actor_id"], username=options["actor_username"], role=Role.ADMIN
+        )
 
         # openpyxl acepta directamente una ruta de archivo; csv.DictReader necesita
         # texto, así que para .csv seguimos usando el wrapper con .read().

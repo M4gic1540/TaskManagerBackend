@@ -15,7 +15,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm
 
-from accounts.models import Role
+from accounts.enums import Role
 from core.exceptions import EntityNotFoundError, PermissionDeniedError, ValidationError
 from inventory.models import Asset
 from inventory.repositories.asset_repository import AssetRepository
@@ -83,7 +83,9 @@ class AssetService:
         if not fields.get("name"):
             raise ValidationError("El nombre del activo es obligatorio.")
 
-        asset = self.repository.create(created_by=actor, **fields)
+        asset = self.repository.create(
+            created_by_id=actor.id, created_by_username=actor.username, **fields
+        )
         asset.qr_image.save(f"{asset.code}.png", self._generate_qr_file(asset), save=True)
         self.repository.add_history(asset, actor, "Activo creado y QR generado.")
         return asset
@@ -143,7 +145,9 @@ class AssetService:
                 continue
             try:
                 with transaction.atomic():
-                    asset = self.repository.create(created_by=actor, **fields)
+                    asset = self.repository.create(
+                        created_by_id=actor.id, created_by_username=actor.username, **fields
+                    )
                     asset.qr_image.save(f"{asset.code}.png", self._generate_qr_file(asset), save=True)
                     self.repository.add_history(asset, actor, "Activo importado desde planilla legacy.")
                 created.append(asset.code)

@@ -9,7 +9,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsAdmin
+from accounts.permissions import IsAdmin, IsTechnician
 from core.async_support.bridge import to_async
 from core.async_support.mixins import LoopRegisteringMixin
 from core.exceptions import DomainError, EntityNotFoundError, ValidationError
@@ -85,7 +85,11 @@ def _get_public_asset_sync(public_uuid) -> dict:
 
 
 class AssetListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    """Lectura/escritura de inventario: reservado a Admin/Técnico, ya que
+    el detalle incluye precio de compra, N° de factura y notas internas
+    que un usuario USUARIO (solicitante de tickets) no debe poder leer."""
+
+    permission_classes = (IsAdmin | IsTechnician,)
     serializer_class = AssetListSerializer
 
     @extend_schema(
@@ -119,7 +123,7 @@ class AssetListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
 
 
 class AssetDetailView(LoopRegisteringMixin, AsyncGenericAPIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    permission_classes = (IsAdmin | IsTechnician,)
     serializer_class = AssetDetailSerializer
 
     @extend_schema(summary="Detalle de activo (staff)", responses=AssetDetailSerializer)
@@ -192,7 +196,12 @@ class AssetImportView(APIView):
     de filas no se beneficia de async, y así evitamos correr el parser
     de openpyxl dentro del bridge sync/async."""
 
-    permission_classes = (permissions.IsAuthenticated,)
+    # openpyxl carga el workbook completo en memoria: sin este tope, un
+    # archivo gigante (o un xlsx armado como zip bomb) permite agotar
+    # memoria del proceso antes de que se valide una sola fila.
+    MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    permission_classes = (IsAdmin | IsTechnician,)
     parser_classes = (MultiPartParser,)
 
     @extend_schema(
@@ -204,6 +213,12 @@ class AssetImportView(APIView):
         uploaded_file = request.FILES.get("file")
         if not uploaded_file:
             return Response({"detail": "Debes adjuntar un archivo en el campo 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded_file.size > self.MAX_IMPORT_FILE_SIZE:
+            return Response(
+                {"detail": f"El archivo supera el máximo permitido de {self.MAX_IMPORT_FILE_SIZE // (1024 * 1024)}MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             raw_rows = parse_uploaded_inventory_file(uploaded_file)

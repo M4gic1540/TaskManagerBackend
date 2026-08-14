@@ -22,7 +22,9 @@ class FakeTicketRepository:
     def create(self, **fields):
         ticket = SimpleNamespace(
             id=self._next_id, status=TicketStatus.ABIERTO,
-            code=f"TCK-TEST{self._next_id:04d}", assigned_technician=None, **fields,
+            code=f"TCK-TEST{self._next_id:04d}",
+            assigned_technician_id=None, assigned_technician_username="",
+            **fields,
         )
         self._store[ticket.id] = ticket
         self._next_id += 1
@@ -37,11 +39,17 @@ class FakeTicketRepository:
         return entity
 
     def add_comment(self, ticket, author, body):
-        return SimpleNamespace(ticket=ticket, author=author, body=body)
+        return SimpleNamespace(
+            ticket=ticket, author_id=author.id, author_username=author.username, body=body
+        )
 
     def add_time_log(self, ticket, technician, minutes_spent, notes=""):
         return SimpleNamespace(
-            ticket=ticket, technician=technician, minutes_spent=minutes_spent, notes=notes
+            ticket=ticket,
+            technician_id=technician.id,
+            technician_username=technician.username,
+            minutes_spent=minutes_spent,
+            notes=notes,
         )
 
 
@@ -61,7 +69,7 @@ pytestmark = pytest.mark.django_db  # atomic() de Service exige conexión abiert
 
 
 def _user(role, user_id=1):
-    return SimpleNamespace(id=user_id, role=role, is_superuser=False)
+    return SimpleNamespace(id=user_id, username=f"user{user_id}", role=role, is_superuser=False)
 
 
 class TestTicketCreation:
@@ -93,7 +101,12 @@ class TestAssignment:
         )
         actor_usuario = _user("USUARIO", 1)
         with pytest.raises(PermissionDeniedError):
-            service.assign_technician(ticket_id=ticket.id, technician=technician, actor=actor_usuario)
+            service.assign_technician(
+                ticket_id=ticket.id,
+                technician_id=technician.id,
+                technician_username=technician.username,
+                actor=actor_usuario,
+            )
 
     def test_admin_assigns_successfully(self, service):
         requester = _user("USUARIO", 1)
@@ -103,9 +116,15 @@ class TestAssignment:
             title="Falla impresora", description="No imprime", category="HARDWARE",
             priority=None, requester=requester,
         )
-        updated = service.assign_technician(ticket_id=ticket.id, technician=technician, actor=admin)
+        updated = service.assign_technician(
+            ticket_id=ticket.id,
+            technician_id=technician.id,
+            technician_username=technician.username,
+            actor=admin,
+        )
         assert updated.status == TicketStatus.ASIGNADO
-        assert updated.assigned_technician == technician
+        assert updated.assigned_technician_id == technician.id
+        assert updated.assigned_technician_username == technician.username
 
 
 class TestStatusTransitionStrategy:
@@ -133,7 +152,12 @@ class TestCloseRequiresResolutionNotes:
         ticket = service.create_ticket(
             title="t", description="d", category="OTRO", priority=None, requester=requester,
         )
-        service.assign_technician(ticket_id=ticket.id, technician=technician, actor=admin)
+        service.assign_technician(
+            ticket_id=ticket.id,
+            technician_id=technician.id,
+            technician_username=technician.username,
+            actor=admin,
+        )
         service.change_status(ticket_id=ticket.id, new_status=TicketStatus.EN_PROGRESO, actor=technician)
         service.change_status(ticket_id=ticket.id, new_status=TicketStatus.RESUELTO, actor=technician)
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from accounts.models import Role
+from accounts.enums import Role
 from core.exceptions import InvalidStateTransitionError, PermissionDeniedError
 from tickets.models import Ticket, TicketStatus
 

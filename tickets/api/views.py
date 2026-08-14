@@ -7,7 +7,7 @@ from adrf.generics import GenericAPIView as AsyncGenericAPIView
 from adrf.views import APIView as AsyncAPIView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from accounts.models import Role, User
+from accounts.enums import Role
 from accounts.permissions import IsAdmin, IsOwnerOrAssignedTechnicianOrAdmin
 from core.async_support.bridge import to_async
 from core.async_support.mixins import LoopRegisteringMixin
@@ -230,11 +230,13 @@ class TicketAssignView(LoopRegisteringMixin, AsyncAPIView):
         serializer = TicketAssignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        get_user = to_async(User.objects.get)
-        technician = await get_user(pk=serializer.validated_data["technician_id"])
-
         assign = to_async(TicketService().assign_technician)
-        ticket = await assign(ticket_id=ticket_id, technician=technician, actor=request.user)
+        ticket = await assign(
+            ticket_id=ticket_id,
+            technician_id=serializer.validated_data["technician_id"],
+            technician_username=serializer.validated_data["technician_username"],
+            actor=request.user,
+        )
 
         serialize = to_async(_serialize_detail_sync)
         data = await serialize(ticket)

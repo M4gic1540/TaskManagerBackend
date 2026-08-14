@@ -1,20 +1,33 @@
 from rest_framework import serializers
 
-from accounts.api.serializers import UserSerializer
 from inventory.models import Asset, AssetHistory
 
 
+def _user_ref(id_value, username_value):
+    """Referencia liviana {id, username} a un usuario de otro servicio
+    (accounts), reconstruida desde los campos denormalizados guardados
+    al escribir — sin joins ni llamadas HTTP. Mismo shape que antes
+    exponía el UserSerializer anidado (el frontend solo consume `.id`
+    y `.username`)."""
+    if id_value is None:
+        return None
+    return {"id": id_value, "username": username_value}
+
+
 class AssetHistorySerializer(serializers.ModelSerializer):
-    changed_by = UserSerializer(read_only=True)
+    changed_by = serializers.SerializerMethodField()
 
     class Meta:
         model = AssetHistory
         fields = ["id", "changed_by", "action", "created_at"]
         read_only_fields = fields
 
+    def get_changed_by(self, obj):
+        return _user_ref(obj.changed_by_id, obj.changed_by_username)
+
 
 class AssetListSerializer(serializers.ModelSerializer):
-    responsible = UserSerializer(read_only=True)
+    responsible = serializers.SerializerMethodField()
 
     class Meta:
         model = Asset
@@ -25,10 +38,13 @@ class AssetListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_responsible(self, obj):
+        return _user_ref(obj.responsible_id, obj.responsible_username)
+
 
 class AssetDetailSerializer(serializers.ModelSerializer):
-    responsible = UserSerializer(read_only=True)
-    created_by = UserSerializer(read_only=True)
+    responsible = serializers.SerializerMethodField()
+    created_by = serializers.SerializerMethodField()
     history = AssetHistorySerializer(many=True, read_only=True)
 
     class Meta:
@@ -42,14 +58,25 @@ class AssetDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "code", "public_uuid", "qr_image", "created_by", "created_at", "updated_at", "history", "legacy_id"]
 
+    def get_responsible(self, obj):
+        return _user_ref(obj.responsible_id, obj.responsible_username)
+
+    def get_created_by(self, obj):
+        return _user_ref(obj.created_by_id, obj.created_by_username)
+
 
 class AssetCreateSerializer(serializers.ModelSerializer):
+    responsible_id = serializers.IntegerField(required=False, allow_null=True)
+    responsible_username = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=""
+    )
+
     class Meta:
         model = Asset
         fields = [
             "name", "description", "category", "status", "serial_number",
-            "brand", "model", "location", "responsible", "purchase_date",
-            "warranty_until", "notes", "purchase_company", "invoice_number",
+            "brand", "model", "location", "responsible_id", "responsible_username",
+            "purchase_date", "warranty_until", "notes", "purchase_company", "invoice_number",
         ]
 
     def validate_name(self, value):
@@ -83,9 +110,7 @@ class AssetPublicSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_responsible_name(self, obj) -> str:
-        if obj.responsible:
-            return obj.responsible.get_full_name() or obj.responsible.username
-        return ""
+        return obj.responsible_username or ""
 
 
 class InventoryDashboardWarrantySerializer(serializers.Serializer):

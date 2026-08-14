@@ -52,5 +52,10 @@ class Command(BaseCommand):
             priority=None,
             requester=usuario,
         )
-        service.assign_technician(ticket_id=ticket.id, technician=tecnico, actor=admin)
+        service.assign_technician(
+            ticket_id=ticket.id,
+            technician_id=tecnico.id,
+            technician_username=tecnico.username,
+            actor=admin,
+        )
         self.stdout.write(self.style.SUCCESS(f"Ticket demo creado: {ticket.code}"))

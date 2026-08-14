@@ -1,0 +1,87 @@
+"""Reverse proxy transparente: preserva exactamente las rutas
+/api/v1/... que el frontend ya consume, reenviando por prefijo de path
+al microservicio correspondiente (accounts, tickets o inventory). No
+hay circuit breaker acá (decisión explícita del usuario, limitado a las
+llamadas de inventory hacia GLPI) — solo timeout + mapeo de errores de
+red a respuestas HTTP consistentes con el resto de la API."""
+from __future__ import annotations
+
+import httpx
+from django.conf import settings
+from django.http import HttpResponse
+from django.views import View
+
+# Prefijos bajo /api/v1/, en orden de especificidad: 'tickets/' e
+# 'inventory/' antes que el catch-all de accounts (que monta en la raíz
+# de /api/v1/: auth/, me/, technicians/, users/).
+_ROUTE_TABLE = (
+    ("/api/v1/tickets/", "TICKETS_SERVICE_URL"),
+    ("/api/v1/inventory/", "INVENTORY_SERVICE_URL"),
+    ("/api/v1/", "ACCOUNTS_SERVICE_URL"),
+)
+
+_HOP_BY_HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length",
+    # No son hop-by-hop en sentido estricto, pero Django/el servidor ASGI
+    # ya los genera para la respuesta del gateway — copiar también los
+    # del upstream los duplica en la respuesta final.
+    "date", "server",
+}
+
+
+def _resolve_upstream(path: str) -> str | None:
+    for prefix, setting_name in _ROUTE_TABLE:
+        if path.startswith(prefix):
+            base = getattr(settings, setting_name, None)
+            if not base:
+                return None
+            return base.rstrip("/") + path
+    return None
+
+
+class GatewayProxyView(View):
+    http_method_names = ["get", "post", "put", "patch", "delete", "options"]
+
+    def dispatch(self, request, *args, **kwargs):
+        upstream_url = _resolve_upstream(request.path)
+        if upstream_url is None:
+            return HttpResponse(status=404)
+
+        forward_headers = {
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() not in _HOP_BY_HOP_HEADERS
+        }
+
+        timeout = getattr(settings, "GATEWAY_UPSTREAM_TIMEOUT", 10.0)
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                upstream_response = client.request(
+                    method=request.method,
+                    url=upstream_url,
+                    params=request.GET,
+                    headers=forward_headers,
+                    content=request.body,
+                )
+        except httpx.TimeoutException:
+            return HttpResponse(
+                b'{"detail": "El servicio tard\xc3\xb3 demasiado en responder.", "error_type": "GatewayTimeout"}',
+                status=504,
+                content_type="application/json",
+            )
+        except httpx.ConnectError:
+            return HttpResponse(
+                b'{"detail": "Servicio no disponible.", "error_type": "GatewayUnavailable"}',
+                status=503,
+                content_type="application/json",
+            )
+
+        response = HttpResponse(
+            content=upstream_response.content,
+            status=upstream_response.status_code,
+        )
+        for header, value in upstream_response.headers.items():
+            if header.lower() not in _HOP_BY_HOP_HEADERS:
+                response[header] = value
+        return response
