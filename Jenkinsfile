@@ -12,6 +12,8 @@ pipeline {
         SONAR_HOST_URL = 'http://host.docker.internal:9000'
         SONAR_PROJECT_KEY = 'TaskManagerBackend'
         IMAGE_NAME = 'taskmanager-backend'
+        DOCKERHUB_REPO = 'm4gic/gestorinventario'
+        DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
         // No hay .env en el checkout (está gitignored a propósito). Los
         // tests corren contra sqlite (ver IS_TESTING en settings.py) y no
         // tocan la DB real de GLPI, así que solo hace falta un SECRET_KEY
@@ -137,8 +139,30 @@ pipeline {
         stage('Docker build') {
             steps {
                 sh '''
-                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest .
+                    docker build \
+                        -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest \
+                        -t ${DOCKERHUB_REPO}:${BUILD_NUMBER} -t ${DOCKERHUB_REPO}:latest \
+                        .
                 '''
+            }
+        }
+
+        stage('Docker push') {
+            steps {
+                // El plugin de credenciales inyecta usuario/token como env vars
+                // scoped a este bloque — nunca quedan en el log ni en el Jenkinsfile.
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKERHUB_CREDENTIALS_ID}",
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_TOKEN'
+                )]) {
+                    sh '''
+                        echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
+                        docker push ${DOCKERHUB_REPO}:${BUILD_NUMBER}
+                        docker push ${DOCKERHUB_REPO}:latest
+                        docker logout
+                    '''
+                }
             }
         }
     }
