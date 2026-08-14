@@ -61,13 +61,19 @@ pipeline {
                 // monta el volumen nombrado jenkins_home completo (mismo por
                 // nombre en ambos contenedores) y se fija -w al workspace real,
                 // así la ruta coincide sin depender de dónde vive el volumen.
+                // sonar.working.directory: el scanner por defecto escribe
+                // .scannerwork (incluye report-task.txt, que el siguiente
+                // stage necesita para saber qué análisis esperar) en /tmp
+                // DENTRO del contenedor efímero del scanner — se pierde al
+                // salir. Se fuerza a que quede dentro del workspace montado.
                 sh '''
                     docker run --rm \
                         -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
                         -e SONAR_TOKEN="${SONAR_TOKEN}" \
                         -v jenkins_home:/var/jenkins_home \
                         -w "${WORKSPACE}" \
-                        sonarsource/sonar-scanner-cli
+                        sonarsource/sonar-scanner-cli \
+                        -Dsonar.working.directory="${WORKSPACE}/.scannerwork"
                 '''
             }
         }
