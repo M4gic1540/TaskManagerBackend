@@ -12,6 +12,11 @@ pipeline {
         SONAR_HOST_URL = 'http://host.docker.internal:9000'
         SONAR_PROJECT_KEY = 'TaskManagerBackend'
         IMAGE_NAME = 'taskmanager-backend'
+        // No hay .env en el checkout (está gitignored a propósito). Los
+        // tests corren contra sqlite (ver IS_TESTING en settings.py) y no
+        // tocan la DB real de GLPI, así que solo hace falta un SECRET_KEY
+        // dummy para que Django arranque — no es un secreto real.
+        SECRET_KEY = 'ci-dummy-secret-key-not-for-production'
     }
 
     stages {
