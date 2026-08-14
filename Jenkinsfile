@@ -43,8 +43,11 @@ pipeline {
             }
             post {
                 always {
+                    // El plugin cobertura no es compatible con este core de
+                    // Jenkins (NoClassDefFoundError: hudson.util.IOException2,
+                    // clase legacy removida). coverage.xml igual queda
+                    // publicado como artefacto del build más abajo.
                     junit 'test-results/junit.xml'
-                    cobertura coberturaReportFile: 'coverage.xml'
                 }
             }
         }
