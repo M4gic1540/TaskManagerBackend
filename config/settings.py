@@ -193,11 +193,8 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
-    "SCHEMA_PATH_PREFIX": "/api/v1",
-    # Versión fija (no @latest) — reproducible y no se rompe si el CDN
-    # publica un bundle nuevo con cambios incompatibles.
-    "SWAGGER_UI_DIST": "//cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14",
-    "REDOC_DIST": "//cdn.jsdelivr.net/npm/redoc@2.1.5/bundles",
+    "SCHEMA_PATH_PREFIX": "/api/v1"
+
 }
 
 # --- JWT ------------------------------------------------------------------
@@ -245,6 +242,10 @@ INVENTORY_WARRANTY_WARNING_DAYS = 30
 # --- Circuit breaker (llamadas de inventory a la BD externa GLPI) ---------
 GLPI_BREAKER_FAIL_MAX = config("GLPI_BREAKER_FAIL_MAX", default=5, cast=int)
 GLPI_BREAKER_RESET_TIMEOUT = config("GLPI_BREAKER_RESET_TIMEOUT", default=30, cast=int)
+
+# --- Cache-aside de lecturas a GLPI (list_assets / get_dashboard_summary) --
+# 0 desactiva el cacheo (cada llamada golpea la BD externa de nuevo).
+GLPI_CACHE_TTL_SECONDS = config("GLPI_CACHE_TTL_SECONDS", default=60, cast=int)
 
 # --- Logging ----------------------------------------------------------
 LOGGING = {

@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import base64
 import io
-import math
 import zipfile
 from typing import Any, Dict, List, Optional
 import qrcode
 from django.conf import settings
+from django.core.cache import cache
 from django.db import connections
-from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm
 
 from inventory.services.qr_label import build_qr_label_image, sanitize_filename
 from core.resilience.circuit_breaker import call_with_breaker
@@ -82,15 +79,17 @@ _LOCATION_COUNT_SQL_TEMPLATE = """
     GROUP BY l.completename
 """
 
-_SERIAL_LOOKUP_SQL_TEMPLATE = """
-    SELECT t.serial FROM __TABLE__ t
-    WHERE t.id = %s AND t.is_deleted = 0
-"""
-
 _SERIAL_AND_INVENTORY_LOOKUP_SQL_TEMPLATE = """
     SELECT t.serial, t.otherserial FROM __TABLE__ t
     WHERE t.id = %s AND t.is_deleted = 0
 """
+
+
+def _cache_key(method_name: str, **params: Any) -> str:
+    """Clave estable por método + parámetros -llamadas con distintos
+    filtros no comparten entrada de caché entre sí."""
+    parts = "&".join(f"{k}={params[k]}" for k in sorted(params))
+    return f"glpi:{method_name}:{parts}" if parts else f"glpi:{method_name}"
 
 
 def _generate_qr_data_url(url: str) -> str:
@@ -125,7 +124,16 @@ class GLPIInventoryService:
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        return call_with_breaker(self._list_assets_impl, search, category, status, limit)
+        # Cache-aside: reduce la carga sobre la BD externa de GLPI en
+        # lecturas repetidas (listado/dashboard se piden en cada refresh
+        # de pantalla). El circuit breaker sigue protegiendo el miss.
+        key = _cache_key("list_assets", search=search, category=category, status=status, limit=limit)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        result = call_with_breaker(self._list_assets_impl, search, category, status, limit)
+        cache.set(key, result, timeout=settings.GLPI_CACHE_TTL_SECONDS)
+        return result
 
     def _list_assets_impl(
         self,
@@ -194,7 +202,13 @@ class GLPIInventoryService:
         return results[:limit]
 
     def get_dashboard_summary(self) -> Dict[str, Any]:
-        return call_with_breaker(self._get_dashboard_summary_impl)
+        key = _cache_key("get_dashboard_summary")
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        result = call_with_breaker(self._get_dashboard_summary_impl)
+        cache.set(key, result, timeout=settings.GLPI_CACHE_TTL_SECONDS)
+        return result
 
     def _get_dashboard_summary_impl(self) -> Dict[str, Any]:
         """Calcula los KPIs agregados del inventario consultando MariaDB."""
@@ -241,70 +255,6 @@ class GLPIInventoryService:
         img = qr.make_image(fill_color="black", back_color="white")
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
-        return buffer.getvalue()
-
-    def generate_qr_sheet_docx(self, *, asset_ids: list[str]) -> bytes:
-        return call_with_breaker(self._generate_qr_sheet_docx_impl, asset_ids=asset_ids)
-
-    def _generate_qr_sheet_docx_impl(self, *, asset_ids: list[str]) -> bytes:
-        """Genera documento Word con QRs de GLPI y S/N debajo. asset_ids es lista
-        de strings formato 'pc_123' o 'monitor_45' (category_id). Solo muestra QR + S/N."""
-        connection = connections[self.db_alias]
-        glpi_base_url = getattr(settings, "GLPI_BASE_URL", "https://glpi.cmm.uchile.cl").rstrip("/")
-
-        assets_data = []
-        for asset_id in asset_ids:
-            if "_" not in asset_id:
-                continue
-            cat_code, obj_id = asset_id.split("_", 1)
-            obj_id = int(obj_id)
-
-            for table_name, category, form_page in TABLE_MAPPING:
-                if cat_code.upper() != category:
-                    continue
-
-                with connection.cursor() as cursor:
-                    safe_table = _safe_table_identifier(connection, table_name)
-                    cursor.execute(
-                        _SERIAL_LOOKUP_SQL_TEMPLATE.replace("__TABLE__", safe_table),
-                        [obj_id],
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        glpi_url = f"{glpi_base_url}/front/{form_page}?id={obj_id}"
-                        assets_data.append({
-                            "serial": row[0] or "",
-                            "glpi_url": glpi_url,
-                        })
-                break
-
-        if not assets_data:
-            from core.exceptions import EntityNotFoundError
-            raise EntityNotFoundError("Ninguno de los activos solicitados existe.")
-
-        document = Document()
-        document.add_heading("Etiquetas QR de Inventario GLPI", level=1)
-
-        columns = 3
-        rows = math.ceil(len(assets_data) / columns)
-        table = document.add_table(rows=rows, cols=columns)
-
-        for index, asset in enumerate(assets_data):
-            cell = table.cell(index // columns, index % columns)
-
-            image_paragraph = cell.paragraphs[0]
-            image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            image_paragraph.add_run().add_picture(
-                io.BytesIO(self._generate_qr_png_bytes(asset["glpi_url"])), width=Cm(2.5)
-            )
-
-            if asset["serial"]:
-                serial_paragraph = cell.add_paragraph()
-                serial_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                serial_paragraph.add_run(asset["serial"]).bold = True
-
-        buffer = io.BytesIO()
-        document.save(buffer)
         return buffer.getvalue()
 
     def generate_qr_images_zip(self, *, asset_ids: list[str]) -> bytes:
