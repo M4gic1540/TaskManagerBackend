@@ -46,7 +46,7 @@ class TicketRequestedBySpec(Specification):
 
 class TicketUnassignedSpec(Specification):
     def to_query(self) -> Q:
-        return Q(assigned_technician__isnull=True)
+        return Q(assigned_technician_id__isnull=True)
 
 
 class TicketSearchTextSpec(Specification):

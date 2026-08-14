@@ -33,12 +33,27 @@ pipeline {
 
         stage('Test + coverage') {
             steps {
+                // Código como config/service_settings/*.py o gateway/ solo
+                // se ejecuta bajo el DJANGO_SETTINGS_MODULE de su propio
+                // microservicio (ver pytest.ini), nunca bajo config.settings
+                // — un único coverage.xml del monolito los reportaría 0%
+                // aunque estén testeados. Cada corrida escribe su propio
+                // .coverage.<nombre> y se combinan al final en un solo
+                // reporte antes de subirlo a SonarQube.
                 sh '''
                     . .venv/bin/activate
                     mkdir -p test-results
-                    pytest accounts tickets inventory core \
+                    COVERAGE_FILE=.coverage.monolito pytest accounts tickets inventory core \
                         --junitxml=test-results/junit.xml \
-                        --cov=. --cov-report=xml:coverage.xml --cov-report=term-missing
+                        --cov=. --cov-report=
+                    for svc in accounts tickets inventory gateway; do
+                        COVERAGE_FILE=.coverage.$svc pytest --ds=config.service_settings.$svc $svc/ \
+                            --junitxml=test-results/junit-$svc.xml \
+                            --cov=. --cov-report=
+                    done
+                    coverage combine .coverage.monolito .coverage.accounts .coverage.tickets .coverage.inventory .coverage.gateway
+                    coverage xml -o coverage.xml
+                    coverage report
                 '''
             }
             post {
@@ -47,29 +62,7 @@ pipeline {
                     // Jenkins (NoClassDefFoundError: hudson.util.IOException2,
                     // clase legacy removida). coverage.xml igual queda
                     // publicado como artefacto del build más abajo.
-                    junit 'test-results/junit.xml'
-                }
-            }
-        }
-
-        stage('Test (microservicios)') {
-            steps {
-                // Cada servicio corre bajo su propio DJANGO_SETTINGS_MODULE
-                // (config/service_settings/*.py) — gateway en particular no
-                // tiene app propia bajo config.settings, por eso queda
-                // excluido de la recolección por defecto (ver pytest.ini)
-                // y solo se ejecuta acá con su --ds explícito.
-                sh '''
-                    . .venv/bin/activate
-                    for svc in accounts tickets inventory gateway; do
-                        pytest --ds=config.service_settings.$svc $svc/ \
-                            --junitxml=test-results/junit-$svc.xml --no-cov
-                    done
-                '''
-            }
-            post {
-                always {
-                    junit 'test-results/junit-*.xml'
+                    junit 'test-results/junit*.xml'
                 }
             }
         }

@@ -4,7 +4,7 @@ inventory) — solo reenvía por prefijo de path (gateway/views.py) a las
 URLs de los otros servicios, leídas de variables de entorno. CORS vive
 acá y solo acá: los servicios internos no son alcanzables directo
 desde el browser."""
-from .base import *  # noqa: F401,F403
+from .base import *  # noqa: F401,F403  # NOSONAR (patrón estándar de settings por herencia)
 
 SERVICE_NAME = "gateway"
 

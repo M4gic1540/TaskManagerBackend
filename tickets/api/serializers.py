@@ -96,7 +96,8 @@ class TicketCreateSerializer(serializers.Serializer):
     description = serializers.CharField()
     category = serializers.ChoiceField(choices=Ticket._meta.get_field("category").choices)
     priority = serializers.ChoiceField(
-        choices=Ticket._meta.get_field("priority").choices, required=False, allow_null=True
+        choices=Ticket._meta.get_field("priority").choices,
+        required=False, allow_null=True, default=None,
     )
 
 

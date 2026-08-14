@@ -3,7 +3,7 @@ conexión externa 'glpi' (MariaDB de solo lectura) — es el único
 servicio que la usa. Sin `accounts` instalado: la identidad se resuelve
 desde los claims del JWT, igual que tickets (ver tickets.py para el
 porqué de mantener `django.contrib.auth` instalado con `auth.User`)."""
-from .base import *  # noqa: F401,F403
+from .base import *  # noqa: F401,F403  # NOSONAR (patrón estándar de settings por herencia)
 
 SERVICE_NAME = "inventory"
 

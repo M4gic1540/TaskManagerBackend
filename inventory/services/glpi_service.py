@@ -260,58 +260,68 @@ class GLPIInventoryService:
     def generate_qr_images_zip(self, *, asset_ids: list[str]) -> bytes:
         return call_with_breaker(self._generate_qr_images_zip_impl, asset_ids=asset_ids)
 
+    def _lookup_asset_for_zip(self, connection, glpi_base_url: str, asset_id: str) -> Optional[Dict[str, Any]]:
+        """Resuelve un 'pc_123'/'monitor_45' a serial/N° inventario/URL, o
+        None si el formato es inválido o el id no existe en su tabla."""
+        if "_" not in asset_id:
+            return None
+        cat_code, obj_id = asset_id.split("_", 1)
+        obj_id = int(obj_id)
+
+        table_name, form_page = next(
+            ((name, page) for name, category, page in TABLE_MAPPING if cat_code.upper() == category),
+            (None, None),
+        )
+        if table_name is None:
+            return None
+
+        with connection.cursor() as cursor:
+            safe_table = _safe_table_identifier(connection, table_name)
+            cursor.execute(
+                _SERIAL_AND_INVENTORY_LOOKUP_SQL_TEMPLATE.replace("__TABLE__", safe_table),
+                [obj_id],
+            )
+            row = cursor.fetchone()
+
+        if not row:
+            return None
+        return {
+            "serial": row[0] or "SIN_SN",
+            "inventory_number": (row[1] or "").strip() or None,
+            "glpi_url": f"{glpi_base_url}/front/{form_page}?id={obj_id}",
+        }
+
+    def _unique_filename(self, serial: str, used_names: set) -> str:
+        filename = f"{sanitize_filename(serial)}.png"
+        if filename not in used_names:
+            return filename
+        base, ext = filename.rsplit(".", 1)
+        suffix = 2
+        while f"{base}_{suffix}.{ext}" in used_names:
+            suffix += 1
+        return f"{base}_{suffix}.{ext}"
+
     def _generate_qr_images_zip_impl(self, *, asset_ids: list[str]) -> bytes:
         """Genera un ZIP con imágenes PNG de QRs (QR + S/N).
         asset_ids es lista de strings formato 'pc_123' o 'monitor_45'."""
         connection = connections[self.db_alias]
         glpi_base_url = getattr(settings, "GLPI_BASE_URL", "https://glpi.cmm.uchile.cl").rstrip("/")
 
-        assets_data = []
-        for asset_id in asset_ids:
-            if "_" not in asset_id:
-                continue
-            cat_code, obj_id = asset_id.split("_", 1)
-            obj_id = int(obj_id)
-
-            for table_name, category, form_page in TABLE_MAPPING:
-                if cat_code.upper() != category:
-                    continue
-
-                with connection.cursor() as cursor:
-                    safe_table = _safe_table_identifier(connection, table_name)
-                    cursor.execute(
-                        _SERIAL_AND_INVENTORY_LOOKUP_SQL_TEMPLATE.replace("__TABLE__", safe_table),
-                        [obj_id],
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        glpi_url = f"{glpi_base_url}/front/{form_page}?id={obj_id}"
-                        assets_data.append({
-                            "serial": row[0] or "SIN_SN",
-                            "inventory_number": (row[1] or "").strip() or None,
-                            "glpi_url": glpi_url,
-                        })
-                break
+        assets_data = [
+            asset
+            for asset_id in asset_ids
+            if (asset := self._lookup_asset_for_zip(connection, glpi_base_url, asset_id)) is not None
+        ]
 
         if not assets_data:
             from core.exceptions import EntityNotFoundError
             raise EntityNotFoundError("Ninguno de los activos solicitados existe.")
 
-        # Crear ZIP
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             used_names = set()
             for asset in assets_data:
-                filename = f"{sanitize_filename(asset['serial'])}.png"
-
-                # Si el nombre ya existe, agregar sufijo
-                if filename in used_names:
-                    base, ext = filename.rsplit(".", 1)
-                    suffix = 2
-                    while f"{base}_{suffix}.{ext}" in used_names:
-                        suffix += 1
-                    filename = f"{base}_{suffix}.{ext}"
-
+                filename = self._unique_filename(asset["serial"], used_names)
                 used_names.add(filename)
                 image_buffer = build_qr_label_image(
                     target_url=asset["glpi_url"],

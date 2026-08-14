@@ -59,16 +59,18 @@ class TestJWTClaimsAuthentication:
     def test_missing_role_claim_rejected(self):
         raw = _make_token(include_role=False)
         request = _make_request(f"Bearer {raw}")
+        auth = JWTClaimsAuthentication()
 
         with pytest.raises(AuthenticationFailed):
-            JWTClaimsAuthentication().authenticate(request)
+            auth.authenticate(request)
 
     def test_missing_username_claim_rejected(self):
         raw = _make_token(include_username=False)
         request = _make_request(f"Bearer {raw}")
+        auth = JWTClaimsAuthentication()
 
         with pytest.raises(AuthenticationFailed):
-            JWTClaimsAuthentication().authenticate(request)
+            auth.authenticate(request)
 
     def test_no_auth_header_returns_none(self):
         request = _make_request(None)
@@ -76,10 +78,12 @@ class TestJWTClaimsAuthentication:
 
     def test_malformed_header_rejected(self):
         request = _make_request("Bearer")
+        auth = JWTClaimsAuthentication()
         with pytest.raises(AuthenticationFailed):
-            JWTClaimsAuthentication().authenticate(request)
+            auth.authenticate(request)
 
     def test_invalid_token_rejected(self):
         request = _make_request("Bearer not-a-real-token")
+        auth = JWTClaimsAuthentication()
         with pytest.raises(InvalidToken):
-            JWTClaimsAuthentication().authenticate(request)
+            auth.authenticate(request)
