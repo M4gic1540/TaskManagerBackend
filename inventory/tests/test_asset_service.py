@@ -43,12 +43,14 @@ class TestCreateAsset:
         assert asset.created_by_username == "tec1"
 
     def test_usuario_role_cannot_create_asset(self, usuario):
+        service = AssetService()
         with pytest.raises(PermissionDeniedError):
-            AssetService().create_asset(actor=usuario, name="Notebook")
+            service.create_asset(actor=usuario, name="Notebook")
 
     def test_missing_name_is_rejected(self, admin):
+        service = AssetService()
         with pytest.raises(ValidationError):
-            AssetService().create_asset(actor=admin, name="")
+            service.create_asset(actor=admin, name="")
 
 
 class TestUpdateAsset:
@@ -61,13 +63,15 @@ class TestUpdateAsset:
 
     def test_usuario_role_cannot_update_asset(self, admin, usuario):
         asset = AssetService().create_asset(actor=admin, name="Notebook")
+        service = AssetService()
 
         with pytest.raises(PermissionDeniedError):
-            AssetService().update_asset(asset_id=asset.pk, actor=usuario, name="Hackeado")
+            service.update_asset(asset_id=asset.pk, actor=usuario, name="Hackeado")
 
     def test_update_nonexistent_asset_raises_not_found(self, admin):
+        service = AssetService()
         with pytest.raises(EntityNotFoundError):
-            AssetService().update_asset(asset_id=99999, actor=admin, name="x")
+            service.update_asset(asset_id=99999, actor=admin, name="x")
 
 
 class TestRegenerateQR:
@@ -82,9 +86,10 @@ class TestRegenerateQR:
 
     def test_usuario_role_cannot_regenerate_qr(self, admin, usuario):
         asset = AssetService().create_asset(actor=admin, name="Notebook")
+        service = AssetService()
 
         with pytest.raises(PermissionDeniedError):
-            AssetService().regenerate_qr(asset_id=asset.pk, actor=usuario)
+            service.regenerate_qr(asset_id=asset.pk, actor=usuario)
 
 
 class TestDeleteAsset:
@@ -99,9 +104,10 @@ class TestDeleteAsset:
         """Solo Admin borra — a diferencia de crear/editar, donde Técnico
         también puede."""
         asset = AssetService().create_asset(actor=admin, name="Notebook")
+        service = AssetService()
 
         with pytest.raises(PermissionDeniedError):
-            AssetService().delete_asset(asset_id=asset.pk, actor=tecnico)
+            service.delete_asset(asset_id=asset.pk, actor=tecnico)
 
 
 class TestImportRows:
@@ -147,8 +153,9 @@ class TestImportRows:
         assert len(result["errors"]) == 1
 
     def test_usuario_role_cannot_import(self, usuario):
+        service = AssetService()
         with pytest.raises(PermissionDeniedError):
-            AssetService().import_rows(rows=[{"name": "x"}], actor=usuario)
+            service.import_rows(rows=[{"name": "x"}], actor=usuario)
 
 
 class TestGetPublicDetail:
@@ -162,8 +169,9 @@ class TestGetPublicDetail:
     def test_unknown_uuid_raises_not_found(self):
         import uuid
 
+        service = AssetService()
         with pytest.raises(EntityNotFoundError):
-            AssetService().get_public_detail(uuid.uuid4())
+            service.get_public_detail(uuid.uuid4())
 
 
 class TestQRExports:
@@ -175,8 +183,9 @@ class TestQRExports:
         assert content[:2] == b"PK"  # .docx es un zip
 
     def test_generate_qr_sheet_docx_raises_when_no_match(self):
+        service = AssetService()
         with pytest.raises(EntityNotFoundError):
-            AssetService().generate_qr_sheet_docx(asset_ids=[99999])
+            service.generate_qr_sheet_docx(asset_ids=[99999])
 
     def test_generate_qr_images_zip_returns_zip_bytes(self, admin):
         asset = AssetService().create_asset(actor=admin, name="Notebook", serial_number="SN10")
@@ -200,5 +209,6 @@ class TestQRExports:
         assert len(set(names)) == 2
 
     def test_generate_qr_images_zip_raises_when_no_match(self):
+        service = AssetService()
         with pytest.raises(EntityNotFoundError):
-            AssetService().generate_qr_images_zip(asset_ids=[99999])
+            service.generate_qr_images_zip(asset_ids=[99999])

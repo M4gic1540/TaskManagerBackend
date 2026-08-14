@@ -16,4 +16,4 @@ os.environ.setdefault("DB_HOST", "unused")
 os.environ.setdefault("DB_USER", "unused")
 os.environ.setdefault("DB_PASSWORD", "unused")
 
-from config.settings import *  # noqa: F401,F403,E402  # NOSONAR (patrón estándar de settings por herencia)
+from config.settings import *  # NOSONAR

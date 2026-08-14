@@ -6,7 +6,7 @@ su propia BD, con la autenticación normal de simplejwt (no por claims).
 
 CORS no vive acá: el único punto expuesto al browser es el API Gateway
 (config/service_settings/gateway.py)."""
-from .base import *  # noqa: F401,F403  # NOSONAR (patrón estándar de settings por herencia)
+from .base import *  # NOSONAR
 
 SERVICE_NAME = "accounts"
 

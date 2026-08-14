@@ -9,7 +9,7 @@ apuntando al `auth.User` stock de Django, nunca usado) porque
 a nivel de módulo — sin la app instalada, ese import revienta el
 arranque aunque `JWTClaimsAuthentication` jamás llame a
 `get_user_model()`."""
-from .base import *  # noqa: F401,F403  # NOSONAR (patrón estándar de settings por herencia)
+from .base import *  # NOSONAR
 
 SERVICE_NAME = "tickets"
 
