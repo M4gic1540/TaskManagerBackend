@@ -17,20 +17,22 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt gunicorn uvicorn[standard]
 
 COPY . .
+COPY entrypoint.sh /app/entrypoint.sh
 
-RUN mkdir -p /app/staticfiles /app/media
-
-# No correr como root: crea un usuario dedicado sin privilegios para el
-# proceso de la app (gunicorn/entrypoint), dueño de /app.
-RUN groupadd --system app && useradd --system --gid app --home /app app \
-    && chown -R app:app /app
+# No correr como root: usuario dedicado sin privilegios para el proceso
+# de la app (gunicorn/entrypoint). Solo staticfiles/media quedan a su
+# nombre (lo único que escribe en runtime); el resto del código y el
+# entrypoint quedan root:root de solo lectura, para que un proceso
+# comprometido no pueda modificar su propio código de arranque.
+RUN mkdir -p /app/staticfiles /app/media \
+    && chmod +x /app/entrypoint.sh \
+    && groupadd --system app \
+    && useradd --system --gid app --home /app app \
+    && chown -R app:app /app/staticfiles /app/media
 USER app
 
 EXPOSE 8000
 
 # Entrypoint aplica migraciones y collectstatic antes de arrancar
 # gunicorn — un solo camino de arranque, sin importar dónde corra.
-COPY --chown=app:app entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
 ENTRYPOINT ["/app/entrypoint.sh"]
