@@ -92,3 +92,6 @@ celerybeat-schedule
 # Database backups
 *.db.backup
 *.sql
+
+# Proyecto de título (LaTeX) — no es parte del backend
+/proyecto-titulo/
