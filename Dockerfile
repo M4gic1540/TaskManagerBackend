@@ -20,11 +20,17 @@ COPY . .
 
 RUN mkdir -p /app/staticfiles /app/media
 
+# No correr como root: crea un usuario dedicado sin privilegios para el
+# proceso de la app (gunicorn/entrypoint), dueño de /app.
+RUN groupadd --system app && useradd --system --gid app --home /app app \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 8000
 
 # Entrypoint aplica migraciones y collectstatic antes de arrancar
 # gunicorn — un solo camino de arranque, sin importar dónde corra.
-COPY entrypoint.sh /app/entrypoint.sh
+COPY --chown=app:app entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
