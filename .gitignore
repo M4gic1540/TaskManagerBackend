@@ -46,6 +46,7 @@ test_db.sqlite3
 .pytest_cache/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .tox/
 .hypothesis/
