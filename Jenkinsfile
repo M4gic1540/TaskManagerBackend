@@ -74,25 +74,41 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
+                // project_status?projectKey=... devuelve el resultado del
+                // último análisis YA PROCESADO — si se consulta apenas se
+                // sube el reporte, puede devolver el estado del scan
+                // ANTERIOR (condición de carrera) en vez de esperar. Se
+                // engancha al Compute Engine task de ESTE scan (su id queda
+                // en .scannerwork/report-task.txt) y solo se consulta el
+                // gate una vez que ese task específico terminó.
                 sh '''
                     set -e
-                    echo "Esperando a que SonarQube procese el análisis..."
+                    TASK_ID=$(grep ceTaskId .scannerwork/report-task.txt | cut -d= -f2)
+                    echo "Esperando el Compute Engine task ${TASK_ID}..."
                     for i in $(seq 1 30); do
-                        STATUS=$(curl -s -u "${SONAR_TOKEN}:" \
-                            "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}" \
-                            | python3 -c "import json,sys; print(json.load(sys.stdin)['projectStatus']['status'])")
-                        echo "Quality Gate: ${STATUS}"
-                        if [ "$STATUS" = "OK" ]; then
-                            exit 0
+                        CE_STATUS=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/ce/task?id=${TASK_ID}" \
+                            | python3 -c "import json,sys; print(json.load(sys.stdin)['task']['status'])")
+                        echo "CE task: ${CE_STATUS}"
+                        if [ "$CE_STATUS" = "SUCCESS" ]; then
+                            break
                         fi
-                        if [ "$STATUS" = "ERROR" ]; then
-                            echo "Quality Gate falló — revisa ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
+                        if [ "$CE_STATUS" = "FAILED" ] || [ "$CE_STATUS" = "CANCELED" ]; then
+                            echo "El análisis en SonarQube falló (CE task ${CE_STATUS})"
                             exit 1
                         fi
                         sleep 5
                     done
-                    echo "Timeout esperando el resultado del Quality Gate"
-                    exit 1
+
+                    ANALYSIS_ID=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/ce/task?id=${TASK_ID}" \
+                        | python3 -c "import json,sys; print(json.load(sys.stdin)['task']['analysisId'])")
+                    GATE_STATUS=$(curl -s -u "${SONAR_TOKEN}:" \
+                        "${SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}" \
+                        | python3 -c "import json,sys; print(json.load(sys.stdin)['projectStatus']['status'])")
+                    echo "Quality Gate: ${GATE_STATUS}"
+                    if [ "$GATE_STATUS" != "OK" ]; then
+                        echo "Quality Gate falló — revisa ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
+                        exit 1
+                    fi
                 '''
             }
         }
