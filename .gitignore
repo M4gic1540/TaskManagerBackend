@@ -47,6 +47,7 @@ test_db.sqlite3
 .coverage
 .coverage.*
 coverage.xml
+test-results/
 htmlcov/
 .tox/
 .hypothesis/
