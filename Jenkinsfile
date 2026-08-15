@@ -139,16 +139,23 @@ pipeline {
         stage('Docker build') {
             steps {
                 sh '''
-                    docker build \
-                        -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest \
-                        -t ${DOCKERHUB_REPO}:${BUILD_NUMBER} -t ${DOCKERHUB_REPO}:latest \
-                        .
+                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest .
                 '''
             }
         }
 
         stage('Docker push') {
+            // Solo produccion publica en DockerHub — el resto de las ramas
+            // (feature, develop, etc.) comparten el mismo tag :latest del
+            // repo, así que si cualquiera pusheara se pisarían entre sí.
+            when {
+                branch 'produccion'
+            }
             steps {
+                sh '''
+                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${DOCKERHUB_REPO}:${BUILD_NUMBER}
+                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${DOCKERHUB_REPO}:latest
+                '''
                 // El plugin de credenciales inyecta usuario/token como env vars
                 // scoped a este bloque — nunca quedan en el log ni en el Jenkinsfile.
                 withCredentials([usernamePassword(
