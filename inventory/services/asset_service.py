@@ -23,6 +23,8 @@ from inventory.services.qr_label import build_qr_label_image, sanitize_filename
 
 
 class AssetService:
+    _GLPI_COMPUTER_FORM_PAGE = "computer.form.php"
+
     def __init__(self, repository: AssetRepository | None = None):
         self.repository = repository or AssetRepository()
 
@@ -41,18 +43,18 @@ class AssetService:
     def _get_glpi_form_page(self, category: str) -> str:
         """Mapea categoría del activo local a la forma de GLPI."""
         mapping = {
-            "PC": "computer.form.php",
-            "LAPTOP": "computer.form.php",
+            "PC": self._GLPI_COMPUTER_FORM_PAGE,
+            "LAPTOP": self._GLPI_COMPUTER_FORM_PAGE,
             "MONITOR": "monitor.form.php",
             "IMPRESORA": "printer.form.php",
             "RED": "networkequipment.form.php",
-            "PROYECTOR": "computer.form.php",
+            "PROYECTOR": self._GLPI_COMPUTER_FORM_PAGE,
             "TELEFONO": "phone.form.php",
             "PERIFERICO": "peripheral.form.php",
-            "SERVIDOR": "computer.form.php",
-            "OTRO": "computer.form.php",
+            "SERVIDOR": self._GLPI_COMPUTER_FORM_PAGE,
+            "OTRO": self._GLPI_COMPUTER_FORM_PAGE,
         }
-        return mapping.get(category, "computer.form.php")
+        return mapping.get(category, self._GLPI_COMPUTER_FORM_PAGE)
 
     def _generate_qr_file(self, asset: Asset) -> ContentFile:
         """Genera el PNG de `qr_image`. Antes se forzaba a 50x50px (thumbnail
