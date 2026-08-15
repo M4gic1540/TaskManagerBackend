@@ -1,22 +1,25 @@
-# Orquesta los 4 microservicios (accounts, tickets, inventory, gateway)
-# + su BD PostgreSQL propia cada uno, localmente, reusando el mismo
-# Dockerfile parametrizado por SERVICE_SETTINGS. Jenkins/SonarQube
-# quedan fuera de este compose — siguen gestionados aparte, contra el
-# monolito (`docker build .` sin build-arg, ver Dockerfile).
+# Orquesta los 5 microservicios (accounts, tickets, inventory, gateway,
+# bff) + su BD PostgreSQL propia cada uno (accounts/tickets/inventory),
+# localmente, reusando el mismo Dockerfile parametrizado por
+# SERVICE_SETTINGS. Jenkins/SonarQube quedan fuera de este compose —
+# siguen gestionados aparte, contra el monolito (`docker build .` sin
+# build-arg, ver Dockerfile).
 #
 # Orden de arranque: cada microservicio depende de su propia BD con
 # `condition: service_healthy` (pg_isready), así Compose no lo arranca
 # hasta que Postgres está realmente aceptando conexiones — no solo
 # "el contenedor existe". El gateway a su vez depende de que los 3
 # microservicios estén healthy (su propio /readyz/, que ya valida su
-# conexión a BD), así que la cadena completa es: Postgres x3 -> UP ->
-# accounts/tickets/inventory -> healthy -> gateway.
+# conexión a BD), y el bff depende de que el gateway esté healthy, así
+# que la cadena completa es: Postgres x3 -> UP -> accounts/tickets/
+# inventory -> healthy -> gateway -> healthy -> bff.
 #
 # Uso: copiar .env.example a .env, completar SECRET_KEY, las
 # credenciales GLPI_DB_* y las *_DB_PASSWORD de cada Postgres, y correr
-# `docker compose up --build`. El único puerto expuesto al host es el
-# del gateway (8000): los 3 servicios internos y sus BD solo son
-# alcanzables dentro de la red del compose.
+# `docker compose up --build`. El frontend TODAVÍA habla con el gateway
+# (8000) — el bff (8010) es fase 1 del plan de BFF, expuesto en un
+# puerto aparte mientras no reemplaza nada. Los 3 servicios internos y
+# sus BD solo son alcanzables dentro de la red del compose.
 
 services:
   db-accounts:
@@ -171,6 +174,7 @@ services:
       TICKETS_SERVICE_URL: http://tickets:8000
       INVENTORY_SERVICE_URL: http://inventory:8000
       GATEWAY_UPSTREAM_TIMEOUT: ${GATEWAY_UPSTREAM_TIMEOUT:-10}
+      GATEWAY_DB_NAME: /app/data/gateway_db.sqlite3
     ports:
       - "8000:8000"
     depends_on:
@@ -181,6 +185,41 @@ services:
       inventory:
         condition: service_healthy
     networks: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Fase 1 del BFF (ver plan en .claude/plans/zippy-bubbling-pumpkin.md):
+  # proxy transparente puro hacia el Gateway, en un puerto distinto
+  # (8010) para convivir con el 8000 del Gateway mientras el frontend
+  # sigue sin migrar. El frontend NO habla con este servicio todavía.
+  bff:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.bff
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.bff
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,bff}
+      GATEWAY_URL: http://gateway:8000
+      BFF_UPSTREAM_TIMEOUT: ${BFF_UPSTREAM_TIMEOUT:-10}
+      BFF_DB_NAME: /app/data/bff_db.sqlite3
+    ports:
+      - "8010:8000"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 networks:
   backend:

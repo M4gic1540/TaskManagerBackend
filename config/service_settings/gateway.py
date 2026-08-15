@@ -45,10 +45,19 @@ REST_FRAMEWORK = {
 # El gateway no tiene datos propios que persistir; DATABASES existe
 # solo porque Django lo exige para arrancar (locmem cache/ratelimit no
 # lo necesitan, y ninguna app instalada acá tiene modelos/migraciones).
+# El default de GATEWAY_DB_NAME sigue en BASE_DIR para dev local sin
+# Docker (ahí es escribible); en contenedor, docker-compose lo pisa a
+# /app/data/gateway_db.sqlite3 — el resto de /app queda de solo lectura
+# para el usuario 'app' (ver Dockerfile), así que crear el sqlite ahí
+# desde cero falla en un clone limpio sin este archivo ya generado.
 DATABASES = {
     "default": {
         "ENGINE": SQLITE_ENGINE,
-        "NAME": BASE_DIR / ("test_gateway_db.sqlite3" if IS_TESTING else "gateway_db.sqlite3"),
+        "NAME": (
+            BASE_DIR / "test_gateway_db.sqlite3"
+            if IS_TESTING
+            else config("GATEWAY_DB_NAME", default=str(BASE_DIR / "gateway_db.sqlite3"))
+        ),
     },
 }
 

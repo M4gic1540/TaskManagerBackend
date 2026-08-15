@@ -48,12 +48,12 @@ pipeline {
                     COVERAGE_FILE=.coverage.monolito pytest accounts tickets inventory core \
                         --junitxml=test-results/junit.xml \
                         --cov=. --cov-report=
-                    for svc in accounts tickets inventory gateway; do
+                    for svc in accounts tickets inventory gateway bff; do
                         COVERAGE_FILE=.coverage.$svc pytest --ds=config.service_settings.$svc $svc/ \
                             --junitxml=test-results/junit-$svc.xml \
                             --cov=. --cov-report=
                     done
-                    coverage combine .coverage.monolito .coverage.accounts .coverage.tickets .coverage.inventory .coverage.gateway
+                    coverage combine .coverage.monolito .coverage.accounts .coverage.tickets .coverage.inventory .coverage.gateway .coverage.bff
                     coverage xml -o coverage.xml
                     coverage report
                 '''
