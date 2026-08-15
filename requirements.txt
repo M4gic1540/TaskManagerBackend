@@ -9,7 +9,6 @@ python-decouple==3.8
 qrcode==8.0
 Pillow==11.1.0
 openpyxl==3.1.5
-python-docx==1.1.2
 pytest==8.3.4
 pytest-django==4.9.0
 pytest-cov==7.1.0

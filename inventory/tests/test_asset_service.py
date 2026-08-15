@@ -1,7 +1,7 @@
 """Tests de AssetService: hasta ahora solo se ejercitaba indirecto vía
 vistas HTTP (test_asset_views.py, 2 casos de permisos). Este archivo
 cubre la lógica de negocio directamente — permisos por rol, generación
-de QR, deduplicación en import_rows y las exportaciones .docx/.zip."""
+de QR, deduplicación en import_rows y la exportación .zip."""
 from types import SimpleNamespace
 
 import pytest
@@ -175,18 +175,6 @@ class TestGetPublicDetail:
 
 
 class TestQRExports:
-    def test_generate_qr_sheet_docx_returns_zip_bytes(self, admin):
-        asset = AssetService().create_asset(actor=admin, name="Notebook", serial_number="SN9")
-
-        content = AssetService().generate_qr_sheet_docx(asset_ids=[asset.pk])
-
-        assert content[:2] == b"PK"  # .docx es un zip
-
-    def test_generate_qr_sheet_docx_raises_when_no_match(self):
-        service = AssetService()
-        with pytest.raises(EntityNotFoundError):
-            service.generate_qr_sheet_docx(asset_ids=[99999])
-
     def test_generate_qr_images_zip_returns_zip_bytes(self, admin):
         asset = AssetService().create_asset(actor=admin, name="Notebook", serial_number="SN10")
 

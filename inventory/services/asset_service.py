@@ -4,16 +4,12 @@ estos métodos (Separation of Concerns, igual que TicketService)."""
 from __future__ import annotations
 
 import io
-import math
 import zipfile
 
 import qrcode
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
-from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm
 
 from accounts.enums import Role
 from core.exceptions import EntityNotFoundError, PermissionDeniedError, ValidationError
@@ -166,42 +162,6 @@ class AssetService:
         return self.repository.get_by_uuid(public_uuid)
 
     # --- Hoja imprimible de QRs ---------------------------------------------
-    def generate_qr_sheet_docx(self, *, asset_ids: list[int]) -> bytes:
-        """Arma un .docx con una grilla de QR de los activos indicados, para
-        imprimir y recortar como etiquetas físicas. Debajo de cada QR va
-        únicamente el S/N. Solo QR + S/N sin información adicional."""
-        assets = list(self.repository.get_queryset().filter(pk__in=asset_ids))
-        if not assets:
-            raise EntityNotFoundError("Ninguno de los activos solicitados existe.")
-
-        order = {asset_id: position for position, asset_id in enumerate(asset_ids)}
-        assets.sort(key=lambda asset: order.get(asset.pk, len(asset_ids)))
-
-        document = Document()
-        document.add_heading("Etiquetas QR de Inventario", level=1)
-
-        columns = 3
-        rows = math.ceil(len(assets) / columns)
-        table = document.add_table(rows=rows, cols=columns)
-
-        for index, asset in enumerate(assets):
-            cell = table.cell(index // columns, index % columns)
-
-            image_paragraph = cell.paragraphs[0]
-            image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            image_paragraph.add_run().add_picture(
-                io.BytesIO(self._generate_qr_png_bytes(asset)), width=Cm(2.5)
-            )
-
-            if asset.serial_number:
-                serial_paragraph = cell.add_paragraph()
-                serial_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                serial_paragraph.add_run(asset.serial_number).bold = True
-
-        buffer = io.BytesIO()
-        document.save(buffer)
-        return buffer.getvalue()
-
     def generate_qr_images_zip(self, *, asset_ids: list[int]) -> bytes:
         """Genera un ZIP con imágenes PNG de QRs (QR + S/N) de activos locales."""
         assets = list(self.repository.get_queryset().filter(pk__in=asset_ids))

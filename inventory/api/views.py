@@ -238,56 +238,6 @@ class AssetImportView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
-class AssetQRSheetView(APIView):
-    """Genera una hoja Word (.docx) con los QR de varios activos, para
-    imprimir y recortar como etiquetas físicas en una sola pasada.
-
-    Vista SÍNCRONA (no adrf): armar el documento (dibujar cada QR en
-    memoria + construir la tabla con python-docx) es CPU-bound y no se
-    beneficia de async, mismo criterio que AssetImportView."""
-
-    permission_classes = (permissions.IsAuthenticated,)
-
-    @extend_schema(
-        summary="Generar hoja Word con QR de varios activos",
-        parameters=[
-            OpenApiParameter(
-                "ids",
-                str,
-                required=True,
-                description="IDs de activos separados por coma, ej: 1,2,7,15",
-            ),
-        ],
-    )
-    def get(self, request):
-        raw_ids = request.query_params.get("ids", "")
-        try:
-            asset_ids = [int(value) for value in raw_ids.split(",") if value.strip()]
-        except ValueError:
-            return Response(
-                {"detail": "El parámetro 'ids' debe ser una lista de enteros separados por coma."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not asset_ids:
-            return Response(
-                {"detail": "Debes indicar al menos un id en 'ids'."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            content = AssetService().generate_qr_sheet_docx(asset_ids=asset_ids)
-        except DomainError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_404_NOT_FOUND)
-
-        response = HttpResponse(
-            content,
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        response["Content-Disposition"] = 'attachment; filename="qr_activos.docx"'
-        return response
-
-
 class InventoryDashboardSummaryView(LoopRegisteringMixin, AsyncAPIView):
     """Dashboard ejecutivo de Inventario: solo Admin (mismo criterio de
     rol que el dashboard de tickets). Agregaciones corren en threadpool

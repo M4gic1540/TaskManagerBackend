@@ -119,32 +119,6 @@ class TestAssetPublicDetail:
         assert response.status_code == 404
 
 
-class TestAssetQRSheet:
-    def test_generates_docx_for_valid_ids(self, api_client, admin):
-        asset = _create_asset()
-        api_client.force_authenticate(user=admin)
-
-        response = api_client.get(f"/api/v1/inventory/qr-sheet/?ids={asset.pk}")
-
-        assert response.status_code == 200
-        assert response["Content-Disposition"].endswith('.docx"')
-
-    def test_missing_ids_returns_400(self, api_client, admin):
-        api_client.force_authenticate(user=admin)
-        response = api_client.get("/api/v1/inventory/qr-sheet/?ids=")
-        assert response.status_code == 400
-
-    def test_non_integer_ids_returns_400(self, api_client, admin):
-        api_client.force_authenticate(user=admin)
-        response = api_client.get("/api/v1/inventory/qr-sheet/?ids=abc")
-        assert response.status_code == 400
-
-    def test_unknown_ids_returns_404(self, api_client, admin):
-        api_client.force_authenticate(user=admin)
-        response = api_client.get("/api/v1/inventory/qr-sheet/?ids=99999")
-        assert response.status_code == 404
-
-
 class TestInventoryDashboard:
     def test_admin_can_view_dashboard(self, api_client, admin):
         api_client.force_authenticate(user=admin)
