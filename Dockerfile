@@ -1,15 +1,8 @@
 FROM python:3.13-slim AS base
 
-# Default = monolito completo (config.settings): así `docker build .`
-# sin --build-arg (exactamente como lo llama el Jenkinsfile hoy) sigue
-# produciendo la misma imagen de siempre. Para un microservicio:
-# `docker build --build-arg SERVICE_SETTINGS=config.service_settings.tickets .`
-ARG SERVICE_SETTINGS=config.settings
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    DJANGO_SETTINGS_MODULE=${SERVICE_SETTINGS}
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
@@ -22,6 +15,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt gunicorn uvicorn[standard]
+
+# ARG/ENV de SERVICE_SETTINGS van DESPUÉS de pip install a propósito:
+# así esa capa (la más pesada del build) queda idéntica y cacheada entre
+# las 4 variantes (monolito + accounts/tickets/inventory/gateway) — antes
+# vivía antes del pip install y el cache se invalidaba en cascada para
+# las 4, forzando reinstalar requirements.txt en cada una.
+# Default = monolito completo (config.settings): así `docker build .`
+# sin --build-arg (exactamente como lo llama el Jenkinsfile hoy) sigue
+# produciendo la misma imagen de siempre. Para un microservicio:
+# `docker build --build-arg SERVICE_SETTINGS=config.service_settings.tickets .`
+ARG SERVICE_SETTINGS=config.settings
+ENV DJANGO_SETTINGS_MODULE=${SERVICE_SETTINGS}
 
 COPY . .
 COPY entrypoint.sh /app/entrypoint.sh

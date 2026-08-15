@@ -54,5 +54,9 @@ else:
         "default": {
             "ENGINE": config("TICKETS_DB_ENGINE", default=SQLITE_ENGINE),
             "NAME": config("TICKETS_DB_NAME", default=str(BASE_DIR / "tickets_db.sqlite3")),
+            "USER": config("TICKETS_DB_USER", default=""),
+            "PASSWORD": config("TICKETS_DB_PASSWORD", default=""),
+            "HOST": config("TICKETS_DB_HOST", default=""),
+            "PORT": config("TICKETS_DB_PORT", default=""),
         },
     }
