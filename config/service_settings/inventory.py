@@ -52,6 +52,10 @@ else:
         "default": {
             "ENGINE": config("INVENTORY_DB_ENGINE", default=SQLITE_ENGINE),
             "NAME": config("INVENTORY_DB_NAME", default=str(BASE_DIR / "inventory_db.sqlite3")),
+            "USER": config("INVENTORY_DB_USER", default=""),
+            "PASSWORD": config("INVENTORY_DB_PASSWORD", default=""),
+            "HOST": config("INVENTORY_DB_HOST", default=""),
+            "PORT": config("INVENTORY_DB_PORT", default=""),
         },
         "glpi": {
             "ENGINE": config("DB_ENGINE", default="django.db.backends.mysql"),

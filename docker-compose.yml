@@ -1,15 +1,72 @@
 # Orquesta los 4 microservicios (accounts, tickets, inventory, gateway)
-# localmente, reusando el mismo Dockerfile parametrizado por
-# SERVICE_SETTINGS. Jenkins/SonarQube quedan fuera de este compose —
-# siguen gestionados aparte, contra el monolito (`docker build .` sin
-# build-arg, ver Dockerfile).
+# + su BD PostgreSQL propia cada uno, localmente, reusando el mismo
+# Dockerfile parametrizado por SERVICE_SETTINGS. Jenkins/SonarQube
+# quedan fuera de este compose — siguen gestionados aparte, contra el
+# monolito (`docker build .` sin build-arg, ver Dockerfile).
 #
-# Uso: copiar .env.example a .env, completar SECRET_KEY y las
-# credenciales GLPI_DB_*, y correr `docker compose up --build`.
-# El único puerto expuesto al host es el del gateway (8000): los 3
-# servicios internos solo son alcanzables dentro de la red del compose.
+# Orden de arranque: cada microservicio depende de su propia BD con
+# `condition: service_healthy` (pg_isready), así Compose no lo arranca
+# hasta que Postgres está realmente aceptando conexiones — no solo
+# "el contenedor existe". El gateway a su vez depende de que los 3
+# microservicios estén healthy (su propio /readyz/, que ya valida su
+# conexión a BD), así que la cadena completa es: Postgres x3 -> UP ->
+# accounts/tickets/inventory -> healthy -> gateway.
+#
+# Uso: copiar .env.example a .env, completar SECRET_KEY, las
+# credenciales GLPI_DB_* y las *_DB_PASSWORD de cada Postgres, y correr
+# `docker compose up --build`. El único puerto expuesto al host es el
+# del gateway (8000): los 3 servicios internos y sus BD solo son
+# alcanzables dentro de la red del compose.
 
 services:
+  db-accounts:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${ACCOUNTS_DB_NAME:-accounts}
+      POSTGRES_USER: ${ACCOUNTS_DB_USER:-accounts}
+      POSTGRES_PASSWORD: ${ACCOUNTS_DB_PASSWORD:?Falta ACCOUNTS_DB_PASSWORD en .env}
+    volumes:
+      - db_accounts_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ACCOUNTS_DB_USER:-accounts} -d ${ACCOUNTS_DB_NAME:-accounts}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  db-tickets:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${TICKETS_DB_NAME:-tickets}
+      POSTGRES_USER: ${TICKETS_DB_USER:-tickets}
+      POSTGRES_PASSWORD: ${TICKETS_DB_PASSWORD:?Falta TICKETS_DB_PASSWORD en .env}
+    volumes:
+      - db_tickets_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TICKETS_DB_USER:-tickets} -d ${TICKETS_DB_NAME:-tickets}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  db-inventory:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${INVENTORY_DB_NAME:-inventory}
+      POSTGRES_USER: ${INVENTORY_DB_USER:-inventory}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD:?Falta INVENTORY_DB_PASSWORD en .env}
+    volumes:
+      - db_inventory_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTORY_DB_USER:-inventory} -d ${INVENTORY_DB_NAME:-inventory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   accounts:
     build:
       context: .
@@ -19,9 +76,15 @@ services:
       DJANGO_SETTINGS_MODULE: config.service_settings.accounts
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,accounts}
-      ACCOUNTS_DB_NAME: /app/data/accounts_db.sqlite3
-    volumes:
-      - accounts_data:/app/data
+      ACCOUNTS_DB_ENGINE: django.db.backends.postgresql
+      ACCOUNTS_DB_HOST: db-accounts
+      ACCOUNTS_DB_PORT: 5432
+      ACCOUNTS_DB_NAME: ${ACCOUNTS_DB_NAME:-accounts}
+      ACCOUNTS_DB_USER: ${ACCOUNTS_DB_USER:-accounts}
+      ACCOUNTS_DB_PASSWORD: ${ACCOUNTS_DB_PASSWORD:?Falta ACCOUNTS_DB_PASSWORD en .env}
+    depends_on:
+      db-accounts:
+        condition: service_healthy
     networks: [backend]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
@@ -39,9 +102,15 @@ services:
       DJANGO_SETTINGS_MODULE: config.service_settings.tickets
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,tickets}
-      TICKETS_DB_NAME: /app/data/tickets_db.sqlite3
-    volumes:
-      - tickets_data:/app/data
+      TICKETS_DB_ENGINE: django.db.backends.postgresql
+      TICKETS_DB_HOST: db-tickets
+      TICKETS_DB_PORT: 5432
+      TICKETS_DB_NAME: ${TICKETS_DB_NAME:-tickets}
+      TICKETS_DB_USER: ${TICKETS_DB_USER:-tickets}
+      TICKETS_DB_PASSWORD: ${TICKETS_DB_PASSWORD:?Falta TICKETS_DB_PASSWORD en .env}
+    depends_on:
+      db-tickets:
+        condition: service_healthy
     networks: [backend]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
@@ -59,7 +128,12 @@ services:
       DJANGO_SETTINGS_MODULE: config.service_settings.inventory
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,inventory}
-      INVENTORY_DB_NAME: /app/data/inventory_db.sqlite3
+      INVENTORY_DB_ENGINE: django.db.backends.postgresql
+      INVENTORY_DB_HOST: db-inventory
+      INVENTORY_DB_PORT: 5432
+      INVENTORY_DB_NAME: ${INVENTORY_DB_NAME:-inventory}
+      INVENTORY_DB_USER: ${INVENTORY_DB_USER:-inventory}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Falta INVENTORY_DB_PASSWORD en .env}
       # BD externa GLPI (MariaDB, solo lectura) — sin defaults inseguros,
       # falla explícito si faltan en .env (mismo criterio que el monolito).
       DB_HOST: ${GLPI_DB_HOST:?Falta GLPI_DB_HOST en .env}
@@ -71,8 +145,10 @@ services:
       GLPI_BREAKER_FAIL_MAX: ${GLPI_BREAKER_FAIL_MAX:-5}
       GLPI_BREAKER_RESET_TIMEOUT: ${GLPI_BREAKER_RESET_TIMEOUT:-30}
     volumes:
-      - inventory_data:/app/data
       - inventory_media:/app/media
+    depends_on:
+      db-inventory:
+        condition: service_healthy
     networks: [backend]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz/"]
@@ -110,7 +186,7 @@ networks:
   backend:
 
 volumes:
-  accounts_data:
-  tickets_data:
-  inventory_data:
+  db_accounts_data:
+  db_tickets_data:
+  db_inventory_data:
   inventory_media:

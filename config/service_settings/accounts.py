@@ -53,5 +53,9 @@ else:
         "default": {
             "ENGINE": config("ACCOUNTS_DB_ENGINE", default=SQLITE_ENGINE),
             "NAME": config("ACCOUNTS_DB_NAME", default=str(BASE_DIR / "accounts_db.sqlite3")),
+            "USER": config("ACCOUNTS_DB_USER", default=""),
+            "PASSWORD": config("ACCOUNTS_DB_PASSWORD", default=""),
+            "HOST": config("ACCOUNTS_DB_HOST", default=""),
+            "PORT": config("ACCOUNTS_DB_PORT", default=""),
         },
     }
