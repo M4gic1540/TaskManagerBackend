@@ -91,7 +91,6 @@ def _cache_key(method_name: str, **params: Any) -> str:
     parts = "&".join(f"{k}={params[k]}" for k in sorted(params))
     return f"glpi:{method_name}:{parts}" if parts else f"glpi:{method_name}"
 
-
 def _generate_qr_data_url(url: str) -> str:
     """Genera una imagen PNG del código QR codificado en Base64 Data URL, en
     alta resolución (mismos parámetros que _generate_qr_png_bytes) para que
