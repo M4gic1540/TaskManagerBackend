@@ -1,25 +1,27 @@
 # Orquesta los 5 microservicios (accounts, tickets, inventory, gateway,
-# bff) + su BD PostgreSQL propia cada uno (accounts/tickets/inventory),
-# localmente, reusando el mismo Dockerfile parametrizado por
-# SERVICE_SETTINGS. Jenkins/SonarQube quedan fuera de este compose —
-# siguen gestionados aparte, contra el monolito (`docker build .` sin
-# build-arg, ver Dockerfile).
+# bff) + su BD PostgreSQL propia cada uno (accounts/tickets/inventory)
+# + Redis (sesión del bff), localmente, reusando el mismo Dockerfile
+# parametrizado por SERVICE_SETTINGS. Jenkins/SonarQube quedan fuera de
+# este compose — siguen gestionados aparte, contra el monolito
+# (`docker build .` sin build-arg, ver Dockerfile).
 #
 # Orden de arranque: cada microservicio depende de su propia BD con
 # `condition: service_healthy` (pg_isready), así Compose no lo arranca
 # hasta que Postgres está realmente aceptando conexiones — no solo
 # "el contenedor existe". El gateway a su vez depende de que los 3
 # microservicios estén healthy (su propio /readyz/, que ya valida su
-# conexión a BD), y el bff depende de que el gateway esté healthy, así
-# que la cadena completa es: Postgres x3 -> UP -> accounts/tickets/
-# inventory -> healthy -> gateway -> healthy -> bff.
+# conexión a BD), y el bff depende de que el gateway Y redis estén
+# healthy, así que la cadena completa es: (Postgres x3 -> UP ->
+# accounts/tickets/inventory -> healthy) + redis -> healthy -> gateway
+# -> healthy -> bff.
 #
 # Uso: copiar .env.example a .env, completar SECRET_KEY, las
 # credenciales GLPI_DB_* y las *_DB_PASSWORD de cada Postgres, y correr
 # `docker compose up --build`. El frontend TODAVÍA habla con el gateway
-# (8000) — el bff (8010) es fase 1 del plan de BFF, expuesto en un
-# puerto aparte mientras no reemplaza nada. Los 3 servicios internos y
-# sus BD solo son alcanzables dentro de la red del compose.
+# (8000) — el bff (8010, fase 2 del plan de BFF: login/logout/me con
+# sesión propia) está expuesto en un puerto aparte mientras no
+# reemplaza nada. Los 3 servicios internos, sus BD y redis solo son
+# alcanzables dentro de la red del compose.
 
 services:
   db-accounts:
@@ -78,7 +80,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.service_settings.accounts
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,accounts}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},accounts
       ACCOUNTS_DB_ENGINE: django.db.backends.postgresql
       ACCOUNTS_DB_HOST: db-accounts
       ACCOUNTS_DB_PORT: 5432
@@ -104,7 +106,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.service_settings.tickets
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,tickets}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},tickets
       TICKETS_DB_ENGINE: django.db.backends.postgresql
       TICKETS_DB_HOST: db-tickets
       TICKETS_DB_PORT: 5432
@@ -130,7 +132,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.service_settings.inventory
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,inventory}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},inventory
       INVENTORY_DB_ENGINE: django.db.backends.postgresql
       INVENTORY_DB_HOST: db-inventory
       INVENTORY_DB_PORT: 5432
@@ -168,7 +170,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.service_settings.gateway
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,gateway}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},gateway
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       ACCOUNTS_SERVICE_URL: http://accounts:8000
       TICKETS_SERVICE_URL: http://tickets:8000
@@ -192,10 +194,27 @@ services:
       retries: 5
       start_period: 10s
 
-  # Fase 1 del BFF (ver plan en .claude/plans/zippy-bubbling-pumpkin.md):
-  # proxy transparente puro hacia el Gateway, en un puerto distinto
-  # (8010) para convivir con el 8000 del Gateway mientras el frontend
-  # sigue sin migrar. El frontend NO habla con este servicio todavía.
+  # Sesión server-side del BFF (fase 2, ver plan): SESSION_ENGINE
+  # cache-backed apunta acá, así la sesión (con el JWT adentro) no vive
+  # en memoria del proceso ni en su BD sqlite placeholder.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # BFF (ver plan en .claude/plans/zippy-bubbling-pumpkin.md): proxy
+  # hacia el Gateway + sesión propia (fase 2: login/logout/me con
+  # cookie httpOnly, JWT guardado server-side en Redis). Puerto
+  # distinto (8010) al del Gateway (8000) mientras el frontend sigue
+  # sin migrar — el frontend TODAVÍA no habla con este servicio.
   bff:
     build:
       context: .
@@ -204,14 +223,18 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.service_settings.bff
       SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,bff}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},bff
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:5173}
       GATEWAY_URL: http://gateway:8000
       BFF_UPSTREAM_TIMEOUT: ${BFF_UPSTREAM_TIMEOUT:-10}
       BFF_DB_NAME: /app/data/bff_db.sqlite3
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8010:8000"
     depends_on:
       gateway:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks: [backend]
     healthcheck:
@@ -229,3 +252,4 @@ volumes:
   db_tickets_data:
   db_inventory_data:
   inventory_media:
+  redis_data:
