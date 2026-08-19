@@ -23,6 +23,8 @@ _ROUTE_TABLE = (
     ("/api/v1/tickets/", "TICKETS_SERVICE_URL"),
     ("/api/v1/inventory/", "INVENTORY_SERVICE_URL"),
     ("/api/v1/", "ACCOUNTS_SERVICE_URL"),
+    # QRs de inventario (Asset.qr_image) — el único servicio con media hoy.
+    ("/media/", "INVENTORY_SERVICE_URL"),
 )
 
 

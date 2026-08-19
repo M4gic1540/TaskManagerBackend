@@ -11,6 +11,7 @@ from gateway.views import GatewayProxyView
 
 urlpatterns = [
     re_path(r"^api/v1/.*$", GatewayProxyView.as_view()),
+    re_path(r"^media/.*$", GatewayProxyView.as_view()),
 
     path("healthz/", LivenessView.as_view(), name="healthz"),
     path("readyz/", ReadinessView.as_view(), name="readyz"),

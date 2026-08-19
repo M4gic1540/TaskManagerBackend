@@ -21,6 +21,7 @@ urlpatterns = [
     path("api/v1/bff/auth/me/", MeView.as_view(), name="bff-me"),
 
     re_path(r"^api/v1/.*$", BFFProxyView.as_view()),
+    re_path(r"^media/.*$", BFFProxyView.as_view()),
 
     path("healthz/", LivenessView.as_view(), name="healthz"),
     path("readyz/", ReadinessView.as_view(), name="readyz"),

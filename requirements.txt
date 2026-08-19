@@ -13,6 +13,10 @@ pytest==8.3.4
 pytest-django==4.9.0
 pytest-cov==7.1.0
 PyMySQL==1.1.1
+# Requerido por PyMySQL para autenticar contra MySQL 8 (plugin por defecto
+# caching_sha2_password) — sin esto, cualquier conexión a GLPI revienta con
+# RuntimeError antes de negociar la auth, aunque la conexión TCP funcione.
+cryptography==43.0.3
 psycopg[binary]==3.2.3
 pybreaker==1.2.0
 httpx==0.28.1
