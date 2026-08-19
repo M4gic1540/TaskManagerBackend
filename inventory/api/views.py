@@ -272,16 +272,21 @@ class GLPIAssetListView(LoopRegisteringMixin, AsyncAPIView):
             OpenApiParameter("search", str, description="Búsqueda por texto en nombre/serial/ubicación/marca"),
             OpenApiParameter("category", str, description="Categoría (PC, MONITOR, IMPRESORA, RED, PERIFERICO, TELEFONO)"),
             OpenApiParameter("status", str, description="Filtro por estado"),
+            OpenApiParameter("limit", int, description="Cantidad máxima de activos a devolver (default 200, tope 1000)"),
         ],
     )
     async def get(self, request):
         search = request.query_params.get("search")
         category = request.query_params.get("category")
         status_val = request.query_params.get("status")
+        try:
+            limit = int(request.query_params.get("limit", 200))
+        except (TypeError, ValueError):
+            limit = 200
 
         service = GLPIInventoryService()
         get_assets = to_async(service.list_assets)
-        assets = await get_assets(search=search, category=category, status=status_val)
+        assets = await get_assets(search=search, category=category, status=status_val, limit=limit)
         return Response(assets)
 
 
