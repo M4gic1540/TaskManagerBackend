@@ -27,6 +27,7 @@ from inventory.import_parser import parse_uploaded_inventory_file
 from inventory.services.asset_service import AssetService
 from inventory.services.dashboard_service import InventoryDashboardService
 from inventory.services.glpi_service import GLPIInventoryService
+from inventory.services.xlsx_export import build_glpi_assets_xlsx
 
 from inventory.specifications.asset_specs import (
     AssetByCategorySpec,
@@ -301,6 +302,43 @@ class GLPIDashboardSummaryView(LoopRegisteringMixin, AsyncAPIView):
         get_summary = to_async(service.get_dashboard_summary)
         summary = await get_summary()
         return Response(summary)
+
+
+class GLPIAssetExportView(APIView):
+    """Exporta a Excel (.xlsx) el inventario GLPI consultado, con los
+    mismos filtros que el listado — misma cabecera que la tabla del
+    frontend (sin QR/Acción, que no son datos exportables)."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(
+        summary="Exportar inventario GLPI a Excel",
+        parameters=[
+            OpenApiParameter("search", str, description="Búsqueda por texto en nombre/serial/ubicación/marca"),
+            OpenApiParameter("category", str, description="Categoría (PC, MONITOR, IMPRESORA, RED, PERIFERICO, TELEFONO)"),
+            OpenApiParameter("status", str, description="Filtro por estado"),
+            OpenApiParameter("limit", int, description="Cantidad máxima de activos a incluir (default 200, tope 1000)"),
+        ],
+    )
+    def get(self, request):
+        search = request.query_params.get("search")
+        category = request.query_params.get("category")
+        status_val = request.query_params.get("status")
+        try:
+            limit = int(request.query_params.get("limit", 200))
+        except (TypeError, ValueError):
+            limit = 200
+
+        service = GLPIInventoryService()
+        assets = service.list_assets(search=search, category=category, status=status_val, limit=limit)
+        content = build_glpi_assets_xlsx(assets)
+
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="inventario_glpi.xlsx"'
+        return response
 
 
 class GLPIQRImagesZipView(APIView):
