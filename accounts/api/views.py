@@ -1,4 +1,5 @@
 from adrf.views import APIView as AsyncAPIView
+from django.conf import settings
 from django.utils.decorators import method_decorator
 from django_ratelimit.decorators import ratelimit
 from drf_spectacular.utils import extend_schema
@@ -7,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from accounts.models import User
+from accounts.models import Role, User
 from accounts.permissions import IsAdmin
 from accounts.services.user_service import UserService
 from core.async_support.bridge import to_async
@@ -43,6 +44,49 @@ class RegisterView(generics.CreateAPIView):
     @method_decorator(ratelimit(key="ip", rate="5/m", method="POST", block=True))
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
+
+
+class GoogleAuthMintView(APIView):
+    """Mintea un JWT (mismo formato que login normal) para un email ya
+    verificado por Google — el BFF llega acá DESPUÉS de validar el
+    id_token con las llaves públicas de Google, este endpoint no vuelve
+    a hablar con Google. Sin contraseña: la identidad la garantiza el
+    header interno, nunca expuesto al frontend."""
+
+    permission_classes = (permissions.AllowAny,)
+    throttle_scope = "login"
+
+    @method_decorator(ratelimit(key="ip", rate="10/m", method="POST", block=True))
+    def post(self, request):
+        # getattr, no settings.INTERNAL_AUTH_SECRET directo: el monolito
+        # (config/settings.py) no declara este secreto — solo lo hacen
+        # accounts.py/bff.py — y sin esto reventaría con AttributeError
+        # ahí en vez de simplemente rechazar la request.
+        expected = getattr(settings, "INTERNAL_AUTH_SECRET", None)
+        if not expected or request.headers.get("X-Internal-Auth") != expected:
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        email = (request.data.get("email") or "").strip().lower()
+        if not email:
+            return Response({"detail": "email requerido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "username": email,
+                "first_name": request.data.get("first_name", ""),
+                "last_name": request.data.get("last_name", ""),
+                "role": Role.USUARIO,
+            },
+        )
+        if created:
+            # Nunca inicia sesión con contraseña local: la identidad
+            # siempre la prueba Google.
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
+
+        token = CustomTokenObtainPairSerializer.get_token(user)
+        return Response({"access": str(token.access_token), "refresh": str(token)})
 
 
 class MeView(APIView):

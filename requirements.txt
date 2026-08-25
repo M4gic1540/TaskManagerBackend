@@ -21,4 +21,11 @@ psycopg[binary]==3.2.3
 pybreaker==1.2.0
 httpx==0.28.1
 redis==5.2.1
+# Verifica la firma del id_token que devuelve Google en el login OAuth
+# (bff/auth_views.py) contra las llaves públicas de Google — sin esto
+# tocaría decodificar el JWT a mano sin validar quién lo firmó.
+google-auth==2.36.0
+# Transporte HTTP que exige google.auth.transport.requests.Request()
+# para esa verificación (google-auth no trae uno propio con httpx).
+requests==2.34.2
 

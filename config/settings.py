@@ -247,6 +247,29 @@ GLPI_BREAKER_RESET_TIMEOUT = config("GLPI_BREAKER_RESET_TIMEOUT", default=30, ca
 # 0 desactiva el cacheo (cada llamada golpea la BD externa de nuevo).
 GLPI_CACHE_TTL_SECONDS = config("GLPI_CACHE_TTL_SECONDS", default=60, cast=int)
 
+# --- Email (notificación de ticket creado, ver tickets/observers.py) ------
+# Backend por default = consola: sin credenciales SMTP reales configuradas,
+# el correo se imprime al log en vez de fallar o quedar silenciosamente sin
+# enviarse — hace falta setear EMAIL_HOST_USER/PASSWORD reales para que
+# salga de verdad.
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = config("EMAIL_HOST", default="localhost")
+EMAIL_PORT = config("EMAIL_PORT", default=587, cast=int)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="no-reply@cmm.uchile.cl")
+
+# A quién avisar cada vez que se crea un ticket, sin importar prioridad.
+TICKET_NOTIFICATION_EMAIL = config(
+    "TICKET_NOTIFICATION_EMAIL", default="sistemas@cmm.uchile.cl"
+)
+
+# Para armar un link clickeable al ticket dentro del correo.
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:5173")
+
 # --- Logging ----------------------------------------------------------
 LOGGING = {
     "version": 1,

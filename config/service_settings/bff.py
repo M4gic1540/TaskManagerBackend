@@ -109,3 +109,23 @@ CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_TRUSTED_ORIGINS = config(
     "CSRF_TRUSTED_ORIGINS", default="http://localhost:5173", cast=Csv()
 )
+
+# --- Login con Google (Authorization Code, ver bff/auth_views.py) -----
+# Client ID/Secret con default vacío: el BFF arranca igual sin esto
+# configurado (la feature simplemente responde 503 hasta que se setee),
+# no tiene sentido que tumbe el servicio entero por un login opcional.
+GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", default="")
+GOOGLE_CLIENT_SECRET = config("GOOGLE_CLIENT_SECRET", default="")
+# Tiene que ser EXACTAMENTE la misma URL registrada como "Authorized
+# redirect URI" en Google Cloud Console, esquema+host+puerto+path.
+GOOGLE_REDIRECT_URI = config(
+    "GOOGLE_REDIRECT_URI",
+    default="http://localhost:8010/api/v1/bff/auth/google/callback/",
+)
+# FRONTEND_URL (a dónde manda el browser tras el callback) ya viene de
+# config/settings.py — compartido con tickets.py para el link del
+# correo de "ticket creado".
+# Mismo secreto que accounts.py — ver el comentario ahí. Acá SÍ es
+# requerido (sin default): sin él el BFF no podría llamar al endpoint
+# protegido de accounts para mintear el JWT tras verificar Google.
+INTERNAL_AUTH_SECRET = config("INTERNAL_AUTH_SECRET")

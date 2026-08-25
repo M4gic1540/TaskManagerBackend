@@ -93,3 +93,7 @@ celerybeat-schedule
 
 # Proyecto de título (LaTeX, no relacionado al backend)
 /proyecto-titulo/
+coverage.xml
+
+# Redis dump (BFF, sesiones locales)
+dump.rdb

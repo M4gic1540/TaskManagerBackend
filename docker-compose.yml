@@ -87,6 +87,9 @@ services:
       ACCOUNTS_DB_NAME: ${ACCOUNTS_DB_NAME:-accounts}
       ACCOUNTS_DB_USER: ${ACCOUNTS_DB_USER:-accounts}
       ACCOUNTS_DB_PASSWORD: ${ACCOUNTS_DB_PASSWORD:?Falta ACCOUNTS_DB_PASSWORD en .env}
+      # Secreto compartido con bff para auth/google-mint/ (ver
+      # config/service_settings/accounts.py) — requerido, sin default.
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?Falta INTERNAL_AUTH_SECRET en .env}
     depends_on:
       db-accounts:
         condition: service_healthy
@@ -113,6 +116,18 @@ services:
       TICKETS_DB_NAME: ${TICKETS_DB_NAME:-tickets}
       TICKETS_DB_USER: ${TICKETS_DB_USER:-tickets}
       TICKETS_DB_PASSWORD: ${TICKETS_DB_PASSWORD:?Falta TICKETS_DB_PASSWORD en .env}
+      # Correo de "ticket creado" (ver tickets/observers.py). Sin
+      # EMAIL_HOST_USER/PASSWORD reales cae al backend de consola
+      # (se ve en `docker compose logs tickets`, no rompe nada).
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-localhost}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@cmm.uchile.cl}
+      TICKET_NOTIFICATION_EMAIL: ${TICKET_NOTIFICATION_EMAIL:-sistemas@cmm.uchile.cl}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     depends_on:
       db-tickets:
         condition: service_healthy
@@ -229,6 +244,13 @@ services:
       BFF_UPSTREAM_TIMEOUT: ${BFF_UPSTREAM_TIMEOUT:-10}
       BFF_DB_NAME: /app/data/bff_db.sqlite3
       REDIS_URL: redis://redis:6379/0
+      # Login con Google (ver bff/auth_views.py) + secreto interno
+      # compartido con accounts (auth/google-mint/).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8010/api/v1/bff/auth/google/callback/}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?Falta INTERNAL_AUTH_SECRET en .env}
     ports:
       - "8010:8000"
     depends_on:

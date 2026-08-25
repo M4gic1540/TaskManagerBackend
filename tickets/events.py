@@ -9,6 +9,10 @@ class TicketCreated(DomainEvent):
     ticket_id: int = 0
     code: str = ""
     requester_id: int = 0
+    title: str = ""
+    category: str = ""
+    priority: str = ""
+    requester_username: str = ""
 
 
 @dataclass(frozen=True)

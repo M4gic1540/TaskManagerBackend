@@ -21,5 +21,5 @@ class TicketsConfig(AppConfig):
         for event_type in (TicketCreated, TicketAssigned, TicketStatusChanged, TicketCommented):
             EventBus.subscribe(event_type, audit)
 
-        for event_type in (TicketAssigned, TicketStatusChanged):
+        for event_type in (TicketCreated, TicketAssigned, TicketStatusChanged):
             EventBus.subscribe(event_type, notify)

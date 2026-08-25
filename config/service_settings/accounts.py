@@ -41,6 +41,13 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls_accounts"
 
+# Secreto compartido con el BFF (config/service_settings/bff.py) para
+# el endpoint auth/google-mint/: quien llegue sin este header no puede
+# mintear un JWT arbitrario en nombre de un email. No es opcional —
+# sin este secreto, cualquiera que le pegue directo al Gateway podría
+# suplantar a cualquier usuario.
+INTERNAL_AUTH_SECRET = config("INTERNAL_AUTH_SECRET")
+
 if IS_TESTING:
     DATABASES = {
         "default": {

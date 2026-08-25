@@ -1,6 +1,12 @@
 from django.urls import path, re_path
 
-from bff.auth_views import LoginView, LogoutView, MeView
+from bff.auth_views import (
+    GoogleLoginCallbackView,
+    GoogleLoginStartView,
+    LoginView,
+    LogoutView,
+    MeView,
+)
 from bff.views import BFFProxyView
 from core.health.views import LivenessView, ReadinessView
 
@@ -19,6 +25,12 @@ urlpatterns = [
     path("api/v1/bff/auth/login/", LoginView.as_view(), name="bff-login"),
     path("api/v1/bff/auth/logout/", LogoutView.as_view(), name="bff-logout"),
     path("api/v1/bff/auth/me/", MeView.as_view(), name="bff-me"),
+    path("api/v1/bff/auth/google/start/", GoogleLoginStartView.as_view(), name="bff-google-start"),
+    path(
+        "api/v1/bff/auth/google/callback/",
+        GoogleLoginCallbackView.as_view(),
+        name="bff-google-callback",
+    ),
 
     re_path(r"^api/v1/.*$", BFFProxyView.as_view()),
     re_path(r"^media/.*$", BFFProxyView.as_view()),

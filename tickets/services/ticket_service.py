@@ -36,6 +36,8 @@ class TicketService:
 
         EventBus.publish(TicketCreated(
             ticket_id=ticket.id, code=ticket.code, requester_id=requester.id,
+            title=ticket.title, category=ticket.category, priority=ticket.priority,
+            requester_username=ticket.requester_username,
         ))
         return ticket
 
