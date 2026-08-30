@@ -21,7 +21,7 @@ from core.exceptions import (
     PermissionDeniedError,
     ValidationError,
 )
-from tickets.models import Ticket, TicketCategory, TicketPriority, TicketStatus
+from tickets.models import Ticket, TicketCategory, TicketStatus
 from tickets.services.ticket_service import TicketService
 
 pytestmark = pytest.mark.django_db
@@ -57,7 +57,7 @@ def technician():
 def unassigned_ticket(requester):
     return Ticket.objects.create(
         title="Ticket sin asignar", description="d", category=TicketCategory.HARDWARE,
-        priority=TicketPriority.MEDIA, status=TicketStatus.ABIERTO,
+        status=TicketStatus.ABIERTO,
         requester_id=requester.id, requester_username=requester.username,
     )
 

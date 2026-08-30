@@ -17,9 +17,10 @@ from accounts.api.serializers import (
     CustomTokenObtainPairSerializer,
     RoleChangeSerializer,
     TechnicianCreationSerializer,
-    UserRegistrationSerializer,
     UserSerializer,
 )
+
+_UNAUTHORIZED_DETAIL = "No autorizado."
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -34,24 +35,17 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         return super().post(request, *args, **kwargs)
 
 
-class RegisterView(generics.CreateAPIView):
-    """Registro público. Siempre crea rol USUARIO (Solicitante)."""
-
-    queryset = User.objects.all()
-    serializer_class = UserRegistrationSerializer
-    permission_classes = (permissions.AllowAny,)
-
-    @method_decorator(ratelimit(key="ip", rate="5/m", method="POST", block=True))
-    def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
-
-
 class GoogleAuthMintView(APIView):
     """Mintea un JWT (mismo formato que login normal) para un email ya
     verificado por Google — el BFF llega acá DESPUÉS de validar el
     id_token con las llaves públicas de Google, este endpoint no vuelve
     a hablar con Google. Sin contraseña: la identidad la garantiza el
-    header interno, nunca expuesto al frontend."""
+    header interno, nunca expuesto al frontend.
+
+    No auto-provisiona cuentas: el usuario final ya no tiene acceso al
+    sistema (solo interactúa por correo), así que solo las cuentas de
+    staff ya provisionadas a mano (rol TECNICO/ADMIN) pueden entrar por
+    Gmail — un email desconocido o con rol USUARIO se rechaza."""
 
     permission_classes = (permissions.AllowAny,)
     throttle_scope = "login"
@@ -64,26 +58,19 @@ class GoogleAuthMintView(APIView):
         # ahí en vez de simplemente rechazar la request.
         expected = getattr(settings, "INTERNAL_AUTH_SECRET", None)
         if not expected or request.headers.get("X-Internal-Auth") != expected:
-            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": _UNAUTHORIZED_DETAIL}, status=status.HTTP_403_FORBIDDEN)
 
         email = (request.data.get("email") or "").strip().lower()
         if not email:
             return Response({"detail": "email requerido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        user, created = User.objects.get_or_create(
-            email=email,
-            defaults={
-                "username": email,
-                "first_name": request.data.get("first_name", ""),
-                "last_name": request.data.get("last_name", ""),
-                "role": Role.USUARIO,
-            },
-        )
-        if created:
-            # Nunca inicia sesión con contraseña local: la identidad
-            # siempre la prueba Google.
-            user.set_unusable_password()
-            user.save(update_fields=["password"])
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"detail": _UNAUTHORIZED_DETAIL}, status=status.HTTP_403_FORBIDDEN)
+
+        if user.role == Role.USUARIO:
+            return Response({"detail": _UNAUTHORIZED_DETAIL}, status=status.HTTP_403_FORBIDDEN)
 
         token = CustomTokenObtainPairSerializer.get_token(user)
         return Response({"access": str(token.access_token), "refresh": str(token)})

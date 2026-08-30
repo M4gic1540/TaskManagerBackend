@@ -8,15 +8,20 @@ from adrf.views import APIView as AsyncAPIView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from accounts.enums import Role
-from accounts.permissions import IsAdmin, IsOwnerOrAssignedTechnicianOrAdmin
+from accounts.permissions import (
+    IsAdmin,
+    IsOwnerOrAssignedTechnicianOrAdmin,
+    IsOwnerOrTechnicianOrAdmin,
+)
 from core.async_support.bridge import to_async
 from core.async_support.mixins import LoopRegisteringMixin
 from core.specifications.base import AlwaysTrueSpecification
 from rest_framework import permissions, status
 from rest_framework.response import Response
-from tickets.models import TicketStatus
+from tickets.models import ResponseTemplate, TicketStatus
 from tickets.api.serializers import (
     DashboardSummarySerializer,
+    ResponseTemplateSerializer,
     TicketAssignSerializer,
     TicketCloseSerializer,
     TicketCommentCreateSerializer,
@@ -33,7 +38,6 @@ from tickets.services.ticket_service import TicketService
 from tickets.specifications.ticket_specs import (
     TicketAssignedToSpec,
     TicketByCategorySpec,
-    TicketByPrioritySpec,
     TicketByStatusSpec,
     TicketRequestedBySpec,
     TicketSearchTextSpec,
@@ -55,8 +59,6 @@ def _build_filter_spec(query_params):
     spec = AlwaysTrueSpecification()
     if status_ := query_params.get("status"):
         spec = spec & TicketByStatusSpec(status_)
-    if priority := query_params.get("priority"):
-        spec = spec & TicketByPrioritySpec(priority)
     if category := query_params.get("category"):
         spec = spec & TicketByCategorySpec(category)
     if search := query_params.get("search"):
@@ -118,7 +120,6 @@ class TicketListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
         ),
         parameters=[
             OpenApiParameter("status", str, description="Filtrar por estado exacto"),
-            OpenApiParameter("priority", str, description="Filtrar por prioridad exacta"),
             OpenApiParameter("category", str, description="Filtrar por categoría exacta"),
             OpenApiParameter("search", str, description="Búsqueda en título/descripción/código"),
         ],
@@ -132,7 +133,6 @@ class TicketListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
 
     @extend_schema(
         summary="Crear ticket",
-        description="Prioridad se infiere de la categoría si no se especifica (Factory Pattern).",
         request=TicketCreateSerializer,
         responses={201: TicketDetailSerializer},
     )
@@ -199,7 +199,7 @@ class TicketTakeView(LoopRegisteringMixin, AsyncAPIView):
 
 
 class TicketDetailView(LoopRegisteringMixin, AsyncAPIView):
-    permission_classes = (permissions.IsAuthenticated, IsOwnerOrAssignedTechnicianOrAdmin)
+    permission_classes = (permissions.IsAuthenticated, IsOwnerOrTechnicianOrAdmin)
 
     @extend_schema(
         summary="Detalle de ticket",
@@ -315,11 +315,96 @@ class TicketCommentListCreateView(LoopRegisteringMixin, AsyncAPIView):
         serializer = TicketCommentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        # Defensa en profundidad: solo Técnico/Admin puede marcar una nota
+        # como interna (en la práctica ya no hay otro rol logueado, ver
+        # CustomTokenObtainPairSerializer, pero no se confía ciegamente
+        # en el flag que mande el cliente).
+        is_internal = serializer.validated_data["is_internal"]
+        if is_internal and request.user.role not in (Role.TECNICO, Role.ADMIN):
+            is_internal = False
+
         add_comment = to_async(TicketService().add_comment)
         comment = await add_comment(
-            ticket_id=ticket_id, author=request.user, body=serializer.validated_data["body"]
+            ticket_id=ticket_id, author=request.user,
+            body=serializer.validated_data["body"], is_internal=is_internal,
         )
         return Response(TicketCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
+
+_ADMIN_ONLY_DETAIL = "Requiere rol Administrador."
+
+
+def _is_admin(user) -> bool:
+    return user.role == Role.ADMIN or user.is_superuser
+
+
+class ResponseTemplateListCreateView(LoopRegisteringMixin, AsyncGenericAPIView):
+    """CRUD de plantillas de respuesta — recurso simple sin lógica de
+    negocio (no amerita Service+Repository), mismo patrón que
+    accounts/api/views.py::RegisterView."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = ResponseTemplateSerializer
+
+    @extend_schema(summary="Listar plantillas de respuesta", responses=ResponseTemplateSerializer(many=True))
+    async def get(self, request):
+        list_templates = to_async(lambda: list(ResponseTemplate.objects.all()))
+        templates = await list_templates()
+        return Response(ResponseTemplateSerializer(templates, many=True).data)
+
+    @extend_schema(
+        summary="Crear plantilla de respuesta (solo Admin)",
+        request=ResponseTemplateSerializer, responses={201: ResponseTemplateSerializer},
+    )
+    async def post(self, request):
+        if not _is_admin(request.user):
+            return Response({"detail": _ADMIN_ONLY_DETAIL}, status=status.HTTP_403_FORBIDDEN)
+
+        def _create():
+            serializer = ResponseTemplateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            return serializer.save()
+
+        template = await to_async(_create)()
+        return Response(ResponseTemplateSerializer(template).data, status=status.HTTP_201_CREATED)
+
+
+class ResponseTemplateDetailView(LoopRegisteringMixin, AsyncAPIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @extend_schema(summary="Detalle de plantilla de respuesta", responses=ResponseTemplateSerializer)
+    async def get(self, request, template_id: int):
+        get_template = to_async(lambda: ResponseTemplate.objects.get(pk=template_id))
+        template = await get_template()
+        return Response(ResponseTemplateSerializer(template).data)
+
+    @extend_schema(
+        summary="Editar plantilla de respuesta (solo Admin)",
+        request=ResponseTemplateSerializer, responses=ResponseTemplateSerializer,
+    )
+    async def patch(self, request, template_id: int):
+        if not _is_admin(request.user):
+            return Response({"detail": _ADMIN_ONLY_DETAIL}, status=status.HTTP_403_FORBIDDEN)
+
+        def _update():
+            template = ResponseTemplate.objects.get(pk=template_id)
+            serializer = ResponseTemplateSerializer(template, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            return serializer.save()
+
+        updated = await to_async(_update)()
+        return Response(ResponseTemplateSerializer(updated).data)
+
+    @extend_schema(summary="Eliminar plantilla de respuesta (solo Admin)", responses={204: None})
+    async def delete(self, request, template_id: int):
+        if not _is_admin(request.user):
+            return Response({"detail": _ADMIN_ONLY_DETAIL}, status=status.HTTP_403_FORBIDDEN)
+
+        def _delete():
+            ResponseTemplate.objects.filter(pk=template_id).delete()
+
+        await to_async(_delete)()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TicketTimeLogListCreateView(LoopRegisteringMixin, AsyncAPIView):
@@ -353,9 +438,9 @@ class DashboardSummaryView(LoopRegisteringMixin, AsyncAPIView):
     @extend_schema(
         summary="Dashboard ejecutivo (solo Admin)",
         description=(
-            "KPIs agregados: conteo por estado/prioridad/categoría, "
-            "tiempo promedio de resolución por prioridad, y tickets "
-            "vencidos por SLA (configurado en settings.TICKET_SLA_HOURS)."
+            "KPIs agregados: conteo por estado/categoría, tiempo "
+            "promedio de resolución, y tickets vencidos por SLA "
+            "(umbral plano en settings.TICKET_SLA_HOURS)."
         ),
         responses=DashboardSummarySerializer,
     )

@@ -97,3 +97,9 @@ coverage.xml
 
 # Redis dump (BFF, sesiones locales)
 dump.rdb
+
+# Artefacto entrenado del clasificador de tickets (ver tickets/ml/) —
+# binario regenerable con `python manage.py train_ticket_classifier`,
+# mismo criterio que las *.sqlite3. El dataset semilla SÍ se versiona
+# (tickets/ml/dataset/seed_tickets.csv).
+tickets/ml/model/

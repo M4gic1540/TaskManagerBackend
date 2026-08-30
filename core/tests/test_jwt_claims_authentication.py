@@ -47,6 +47,19 @@ class TestJWTClaimsAuthentication:
         assert user.is_anonymous is False
         assert user.is_active_technician is False
 
+    def test_user_id_claim_as_string_is_cast_to_int(self):
+        """simplejwt >= 5.5 serializa USER_ID_CLAIM como str siempre
+        (Token.for_user hace `str(user_id)` incondicional) — sin castear
+        de vuelta a int, comparaciones == / != contra un IntegerField de
+        la BD (assigned_technician_id, requester_id) fallan siempre."""
+        raw = _make_token(user_id="6", username="tecnico1", role="TECNICO")
+        request = _make_request(f"Bearer {raw}")
+
+        user, _ = JWTClaimsAuthentication().authenticate(request)
+
+        assert user.id == 6
+        assert isinstance(user.id, int)
+
     def test_is_active_technician_defaults_true_when_claim_absent(self):
         """Compatibilidad hacia atrás: un token emitido antes de agregar
         el claim no debe romper, se asume técnico activo por default."""

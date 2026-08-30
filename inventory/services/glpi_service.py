@@ -239,7 +239,7 @@ class GLPIInventoryService:
                     top_locations[loc_name] = top_locations.get(loc_name, 0) + loc_count
 
         sorted_locations = dict(sorted(top_locations.items(), key=lambda item: item[1], reverse=True)[:10])
-
+        
         return {
             "total": total,
             "by_category": by_category,

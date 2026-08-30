@@ -16,6 +16,7 @@ db.sqlite3
 test_db.sqlite3
 media/
 staticfiles/
+tickets/ml/model/
 *.log
 .DS_Store
 generate_qr_labels.py

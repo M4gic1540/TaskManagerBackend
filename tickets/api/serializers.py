@@ -1,6 +1,12 @@
 from rest_framework import serializers
 
-from tickets.models import Ticket, TicketAttachment, TicketComment, TicketTimeLog
+from tickets.models import (
+    ResponseTemplate,
+    Ticket,
+    TicketAttachment,
+    TicketComment,
+    TicketTimeLog,
+)
 
 
 def _user_ref(id_value, username_value):
@@ -19,7 +25,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TicketComment
-        fields = ["id", "author", "body", "created_at"]
+        fields = ["id", "author", "body", "is_internal", "created_at"]
         read_only_fields = ["id", "author", "created_at"]
 
     def get_author(self, obj):
@@ -57,7 +63,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
         fields = [
-            "id", "code", "title", "category", "priority", "status",
+            "id", "code", "title", "category", "status",
             "requester", "assigned_technician", "created_at", "updated_at",
         ]
 
@@ -78,8 +84,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
         fields = [
-            "id", "code", "title", "description", "category", "priority", "status",
-            "requester", "assigned_technician", "resolution_notes",
+            "id", "code", "title", "description", "category", "status",
+            "requester", "requester_email", "assigned_technician", "resolution_notes",
             "comments", "time_logs", "attachments",
             "created_at", "updated_at", "closed_at",
         ]
@@ -95,10 +101,6 @@ class TicketCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=200)
     description = serializers.CharField()
     category = serializers.ChoiceField(choices=Ticket._meta.get_field("category").choices)
-    priority = serializers.ChoiceField(
-        choices=Ticket._meta.get_field("priority").choices,
-        required=False, allow_null=True, default=None,
-    )
 
 
 class TicketAssignSerializer(serializers.Serializer):
@@ -120,6 +122,7 @@ class TicketCloseSerializer(serializers.Serializer):
 
 class TicketCommentCreateSerializer(serializers.Serializer):
     body = serializers.CharField()
+    is_internal = serializers.BooleanField(required=False, default=False)
 
 
 class TicketTimeLogCreateSerializer(serializers.Serializer):
@@ -128,18 +131,21 @@ class TicketTimeLogCreateSerializer(serializers.Serializer):
 
 
 class DashboardSLASerializer(serializers.Serializer):
-    sla_hours_config = serializers.DictField(child=serializers.IntegerField())
-    breached_by_priority = serializers.DictField(child=serializers.IntegerField())
+    sla_hours = serializers.IntegerField()
     total_breached = serializers.IntegerField()
 
 
 class DashboardSummarySerializer(serializers.Serializer):
     by_status = serializers.DictField(child=serializers.IntegerField())
-    by_priority = serializers.DictField(child=serializers.IntegerField())
     by_category = serializers.DictField(child=serializers.IntegerField())
     total = serializers.IntegerField()
     open_total = serializers.IntegerField()
-    avg_resolution_hours = serializers.DictField(
-        child=serializers.FloatField(allow_null=True), allow_null=True
-    )
+    avg_resolution_hours = serializers.FloatField(allow_null=True)
     sla = DashboardSLASerializer()
+
+
+class ResponseTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ResponseTemplate
+        fields = ["id", "name", "subject_template", "body_template", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]

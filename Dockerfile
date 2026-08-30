@@ -8,9 +8,13 @@ WORKDIR /app
 
 # build-essential: por si alguna dependencia necesita compilar (pymysql
 # usa el driver puro-Python, pero Pillow/otras pueden requerir headers).
+# libldap2-dev/libsasl2-dev: headers que python-ldap (django-auth-ldap,
+# ver config/settings.py) necesita para compilar contra OpenLDAP.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    libldap2-dev \
+    libsasl2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -32,17 +36,19 @@ COPY . .
 COPY entrypoint.sh /app/entrypoint.sh
 
 # No correr como root: usuario dedicado sin privilegios para el proceso
-# de la app (gunicorn/entrypoint). Solo staticfiles/media/data quedan a
-# su nombre (lo único que escribe en runtime — 'data' es donde
-# docker-compose monta el volumen con la sqlite de cada microservicio);
+# de la app (gunicorn/entrypoint). Solo staticfiles/media/data/tickets/ml/model
+# quedan a su nombre (lo único que escribe en runtime — 'data' es donde
+# docker-compose monta el volumen con la sqlite de cada microservicio;
+# tickets/ml/model/ es donde entrypoint.sh escribe el artefacto del
+# clasificador de tickets al arrancar, ver train_ticket_classifier);
 # el resto del código y el entrypoint quedan root:root de solo lectura,
 # para que un proceso comprometido no pueda modificar su propio código
 # de arranque.
-RUN mkdir -p /app/staticfiles /app/media /app/data \
+RUN mkdir -p /app/staticfiles /app/media /app/data /app/tickets/ml/model \
     && chmod +x /app/entrypoint.sh \
     && groupadd --system app \
     && useradd --system --gid app --home /app app \
-    && chown -R app:app /app/staticfiles /app/media /app/data
+    && chown -R app:app /app/staticfiles /app/media /app/data /app/tickets/ml/model
 USER app
 
 EXPOSE 8000

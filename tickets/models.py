@@ -21,13 +21,6 @@ class TicketStatus(models.TextChoices):
     CANCELADO = "CANCELADO", "Cancelado"
 
 
-class TicketPriority(models.TextChoices):
-    BAJA = "BAJA", "Baja"
-    MEDIA = "MEDIA", "Media"
-    ALTA = "ALTA", "Alta"
-    CRITICA = "CRITICA", "Crítica"
-
-
 class TicketCategory(models.TextChoices):
     HARDWARE = "HARDWARE", "Hardware"
     SOFTWARE = "SOFTWARE", "Software"
@@ -48,15 +41,17 @@ class Ticket(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     category = models.CharField(max_length=20, choices=TicketCategory.choices)
-    priority = models.CharField(
-        max_length=20, choices=TicketPriority.choices, default=TicketPriority.MEDIA
-    )
     status = models.CharField(
         max_length=20, choices=TicketStatus.choices, default=TicketStatus.ABIERTO, db_index=True
     )
 
     requester_id = models.PositiveBigIntegerField()
     requester_username = models.CharField(max_length=150)
+    requester_email = models.EmailField(blank=True, default="")
+    external_message_id = models.CharField(
+        max_length=255, unique=True, null=True, blank=True,
+        help_text="Message-ID del correo entrante que originó el ticket (idempotencia del poller).",
+    )
     assigned_technician_id = models.PositiveBigIntegerField(null=True, blank=True)
     assigned_technician_username = models.CharField(max_length=150, blank=True, default="")
 
@@ -68,7 +63,7 @@ class Ticket(models.Model):
     class Meta:
         db_table = "tickets_ticket"
         indexes = [
-            models.Index(fields=["status", "priority"]),
+            models.Index(fields=["status"]),
             models.Index(fields=["assigned_technician_id", "status"]),
             models.Index(fields=["requester_id"]),
         ]
@@ -83,11 +78,39 @@ class TicketComment(models.Model):
     author_id = models.PositiveBigIntegerField()
     author_username = models.CharField(max_length=150)
     body = models.TextField()
+    is_internal = models.BooleanField(
+        default=False,
+        help_text="Nota interna (solo Técnico/Admin) — nunca se reenvía por correo al solicitante.",
+    )
+    external_message_id = models.CharField(
+        max_length=255, unique=True, null=True, blank=True,
+        help_text="Message-ID del correo entrante que originó este comentario "
+                   "(idempotencia del poller — evita duplicar la respuesta si el mismo correo se reprocesa).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "tickets_comment"
         ordering = ["created_at"]
+
+
+class ResponseTemplate(models.Model):
+    """Plantilla de respuesta reutilizable para responder tickets por
+    correo. `{code}`/`{title}` se interpolan en el frontend con los
+    datos del ticket antes de enviar."""
+
+    name = models.CharField(max_length=150, unique=True)
+    subject_template = models.CharField(max_length=255)
+    body_template = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tickets_response_template"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class TicketAttachment(models.Model):

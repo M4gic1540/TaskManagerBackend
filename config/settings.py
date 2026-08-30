@@ -211,6 +211,30 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
 }
 
+# --- LDAP institucional (login de staff, junto a Google OAuth) ------------
+# Vacío = LDAP desactivado, solo queda ModelBackend (login con contraseña
+# local) — mismo criterio que el resto de integraciones opcionales del
+# proyecto. `django-auth-ldap`/`python-ldap` solo se importan si de verdad
+# hay un servidor configurado, para no exigir esa dependencia de sistema
+# en quien no usa LDAP (dev local, tests).
+LDAP_SERVER_URI = config("LDAP_SERVER_URI", default="")
+AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+if LDAP_SERVER_URI:
+    import ldap
+    from django_auth_ldap.config import LDAPSearch
+
+    AUTH_LDAP_SERVER_URI = LDAP_SERVER_URI
+    AUTH_LDAP_BIND_DN = config("LDAP_BIND_DN", default="")
+    AUTH_LDAP_BIND_PASSWORD = config("LDAP_BIND_PASSWORD", default="")
+    AUTH_LDAP_USER_SEARCH = LDAPSearch(
+        config("LDAP_USER_SEARCH_BASE", default=""), ldap.SCOPE_SUBTREE, "(uid=%(user)s)"
+    )
+    # Solo nombre/email — el rol (ADMIN/TECNICO) se provisiona a mano de
+    # antemano (ver TechnicianCreationSerializer) y NO se pisa acá, para
+    # no dejar una cuenta de staff con el default USUARIO del modelo.
+    AUTH_LDAP_USER_ATTR_MAP = {"first_name": "givenName", "last_name": "sn", "email": "mail"}
+    AUTHENTICATION_BACKENDS.insert(0, "django_auth_ldap.backend.LDAPBackend")
+
 # --- CORS -----------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = config(
     "CORS_ALLOWED_ORIGINS", default="http://localhost:5173", cast=Csv()
@@ -228,13 +252,9 @@ SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=0, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 
-# --- SLA (horas máximas por prioridad, desde creación hasta cierre/ahora) --
-TICKET_SLA_HOURS = {
-    "CRITICA": 2,
-    "ALTA": 4,
-    "MEDIA": 8,
-    "BAJA": 24,
-}
+# --- SLA (umbral plano en horas, ya no por prioridad — ver
+# tickets/services/dashboard_service.py) ------------------------------------
+TICKET_SLA_HOURS = config("TICKET_SLA_HOURS", default=8, cast=int)
 
 # --- Inventario: ventana de aviso de garantías próximas a vencer (días) ---
 INVENTORY_WARRANTY_WARNING_DAYS = 30
@@ -262,9 +282,21 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="no-reply@cmm.uchile.cl")
 
-# A quién avisar cada vez que se crea un ticket, sin importar prioridad.
-TICKET_NOTIFICATION_EMAIL = config(
-    "TICKET_NOTIFICATION_EMAIL", default="sistemas@cmm.uchile.cl"
+# --- Ingesta de correo entrante (ver tickets/management/commands/
+# poll_inbound_email.py) — cada correo a esta casilla se convierte en
+# ticket, o en respuesta de un ticket existente si el asunto trae su
+# código. Vacío = el poller queda inactivo, no rompe nada (mismo
+# criterio que el resto de las integraciones opcionales del proyecto).
+# Servidor propio hoy, IMAP genérico — mismo host funciona el día que
+# migren a Google Workspace, sin cambios de código.
+INBOUND_EMAIL_HOST = config("INBOUND_EMAIL_HOST", default="")
+INBOUND_EMAIL_PORT = config("INBOUND_EMAIL_PORT", default=993, cast=int)
+INBOUND_EMAIL_USER = config("INBOUND_EMAIL_USER", default="")
+INBOUND_EMAIL_PASSWORD = config("INBOUND_EMAIL_PASSWORD", default="")
+INBOUND_EMAIL_USE_SSL = config("INBOUND_EMAIL_USE_SSL", default=True, cast=bool)
+INBOUND_EMAIL_FOLDER = config("INBOUND_EMAIL_FOLDER", default="INBOX")
+INBOUND_EMAIL_POLL_INTERVAL_SECONDS = config(
+    "INBOUND_EMAIL_POLL_INTERVAL_SECONDS", default=60, cast=int
 )
 
 # Para armar un link clickeable al ticket dentro del correo.

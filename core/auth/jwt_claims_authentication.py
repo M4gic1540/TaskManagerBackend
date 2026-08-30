@@ -83,7 +83,13 @@ class JWTClaimsAuthentication(BaseAuthentication):
 
     def _build_user(self, validated_token) -> TokenClaimsUser:
         try:
-            user_id = validated_token[api_settings.USER_ID_CLAIM]
+            # simplejwt >= 5.5 siempre serializa USER_ID_CLAIM como str
+            # (Token.for_user hace `str(user_id)` incondicional), así que
+            # sin este int() cualquier comparación == / != contra un
+            # IntegerField de la BD (assigned_technician_id, requester_id)
+            # falla siempre ("6" != 6), tumbando en silencio permisos y
+            # reglas de negocio que comparan por id.
+            user_id = int(validated_token[api_settings.USER_ID_CLAIM])
             username = validated_token["username"]
             role = validated_token["role"]
         except KeyError as exc:

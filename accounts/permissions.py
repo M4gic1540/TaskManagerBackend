@@ -51,3 +51,21 @@ class IsOwnerOrAssignedTechnicianOrAdmin(BasePermission):
         if user.role == Role.TECNICO:
             return obj.assigned_technician_id == user.id
         return obj.requester_id == user.id
+
+
+class IsOwnerOrTechnicianOrAdmin(BasePermission):
+    """Object-level: dueño del ticket, cualquier técnico, o admin.
+
+    A diferencia de IsOwnerOrAssignedTechnicianOrAdmin, no exige que el
+    técnico sea el asignado: ver el detalle y cambiar el estado son
+    acciones que cualquier técnico debe poder hacer (p.ej. antes de
+    autoasignarse un ticket del pool de abiertos).
+    """
+
+    message = "No tiene acceso a este ticket."
+
+    def has_object_permission(self, request, view, obj) -> bool:
+        user = request.user
+        if user.role in (Role.ADMIN, Role.TECNICO):
+            return True
+        return obj.requester_id == user.id

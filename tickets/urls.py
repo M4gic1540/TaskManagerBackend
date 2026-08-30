@@ -2,6 +2,8 @@ from django.urls import path
 
 from tickets.api.views import (
     DashboardSummaryView,
+    ResponseTemplateDetailView,
+    ResponseTemplateListCreateView,
     TicketAssignView,
     TicketAvailableListView,
     TicketCloseView,
@@ -17,6 +19,8 @@ urlpatterns = [
     path("", TicketListCreateView.as_view(), name="ticket-list-create"),
     path("dashboard/", DashboardSummaryView.as_view(), name="ticket-dashboard"),
     path("available/", TicketAvailableListView.as_view(), name="ticket-available"),
+    path("templates/", ResponseTemplateListCreateView.as_view(), name="response-template-list-create"),
+    path("templates/<int:template_id>/", ResponseTemplateDetailView.as_view(), name="response-template-detail"),
     path("<int:ticket_id>/", TicketDetailView.as_view(), name="ticket-detail"),
     path("<int:ticket_id>/take/", TicketTakeView.as_view(), name="ticket-take"),
     path("<int:ticket_id>/assign/", TicketAssignView.as_view(), name="ticket-assign"),

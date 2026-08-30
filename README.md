@@ -254,6 +254,41 @@ Reglas (`TicketService.self_assign`):
 no romper el contrato de "Técnico ve solo lo asignado" en el listado
 normal. Es explícitamente "el pool de trabajo pendiente", no "mis tickets".
 
+## Clasificación automática de tickets (ML local)
+
+Al crearse un ticket, un Observer (`tickets/observers.py::_classify_ticket_with_ml`,
+suscrito igual que el correo de notificación) sugiere categoría y
+prioridad a partir del título/descripción y, si la confianza supera
+`TICKET_AI_CONFIDENCE_THRESHOLD` (default `0.5`), las aplica vía
+`TicketService.apply_ai_classification` — el mismo método que antes
+llamaba un endpoint HTTP disparado por un webhook de n8n. Ahora corre
+100% local, sin servicios externos ni secretos compartidos:
+
+```
+tickets/ml/
+  dataset/generate_seed_dataset.py   genera el dataset semilla sintético (~10k tickets)
+  dataset/seed_tickets.csv           dataset semilla (versionado en git)
+  train.py                           entrena 2 pipelines scikit-learn (TF-IDF + LogisticRegression)
+  classifier.py                      TicketClassifier: carga el artefacto y predice
+  model/                             artefacto entrenado (.joblib, gitignored)
+```
+
+Entrenar (o reentrenar) el modelo:
+
+```
+python manage.py train_ticket_classifier              # dataset semilla + tickets reales de la BD
+python manage.py train_ticket_classifier --seed-only   # solo el dataset semilla (usado en el arranque de accounts/inventory/gateway, que no tienen la app tickets)
+```
+
+`entrypoint.sh` lo corre automáticamente al arrancar el contenedor
+(después de las migraciones, antes de levantar gunicorn) para los
+servicios que sí instalan la app `tickets` (monolito y el
+microservicio tickets) — así el modelo se mantiene al día con los
+tickets reales en cada redeploy. Si el artefacto todavía no existe,
+`TicketClassifier.predict()` devuelve `None` y el Observer no aplica
+nada (no-op seguro, mismo criterio que tenía el webhook de n8n cuando
+venía sin configurar).
+
 ## Cambiar el rol de un usuario
 
 Dos caminos:

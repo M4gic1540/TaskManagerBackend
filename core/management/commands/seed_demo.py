@@ -49,7 +49,6 @@ class Command(BaseCommand):
             title="No enciende el computador de sala 204",
             description="El equipo no enciende desde esta mañana, luz de fuente parpadea.",
             category=TicketCategory.HARDWARE,
-            priority=None,
             requester=usuario,
         )
         service.assign_technician(

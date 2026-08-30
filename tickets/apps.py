@@ -8,6 +8,7 @@ class TicketsConfig(AppConfig):
     def ready(self):
         from core.events.base import EventBus
         from tickets.events import (
+            TicketAIClassified,
             TicketAssigned,
             TicketCommented,
             TicketCreated,
@@ -18,8 +19,10 @@ class TicketsConfig(AppConfig):
         audit = TicketAuditObserver()
         notify = TicketNotificationObserver()
 
-        for event_type in (TicketCreated, TicketAssigned, TicketStatusChanged, TicketCommented):
+        for event_type in (
+            TicketCreated, TicketAssigned, TicketStatusChanged, TicketCommented, TicketAIClassified,
+        ):
             EventBus.subscribe(event_type, audit)
 
-        for event_type in (TicketCreated, TicketAssigned, TicketStatusChanged):
+        for event_type in (TicketCreated, TicketAssigned, TicketStatusChanged, TicketCommented):
             EventBus.subscribe(event_type, notify)

@@ -19,30 +19,22 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["is_active_technician"] = user.is_active_technician
         return token
 
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        # El usuario final ya no tiene cuenta en el sistema — solo
+        # interactúa por correo (ver tickets/management/commands/
+        # poll_inbound_email.py). Bloquear acá cubre tanto /auth/login/
+        # directo como bff/auth_views.py::LoginView (que solo lo proxya).
+        if self.user.role == Role.USUARIO:
+            raise serializers.ValidationError("Este rol no tiene acceso al sistema.")
+        return data
+
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "username", "email", "first_name", "last_name", "role", "phone"]
         read_only_fields = ["id"]
-
-
-class UserRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=10)
-
-    class Meta:
-        model = User
-        fields = ["id", "username", "email", "first_name", "last_name", "phone", "password"]
-        read_only_fields = ["id"]
-
-    def create(self, validated_data):
-        password = validated_data.pop("password")
-        # Registro público siempre crea rol USUARIO; escalar a
-        # TECNICO/ADMIN solo vía endpoint de administración (RBAC).
-        user = User(role=Role.USUARIO, **validated_data)
-        user.set_password(password)  # hashing PBKDF2, nunca texto plano
-        user.save()
-        return user
 
 
 class TechnicianCreationSerializer(serializers.ModelSerializer):

@@ -9,6 +9,12 @@ python-decouple==3.8
 qrcode==8.0
 Pillow==11.1.0
 openpyxl==3.1.5
+# Clasificador local de tickets (categoría, ver tickets/ml/) — TF-IDF +
+# regresión logística entrenados con el dataset semilla, sin llamar a
+# ninguna API externa.
+scikit-learn==1.7.2
+pandas==2.3.3
+joblib==1.5.3
 pytest==8.3.4
 pytest-django==4.9.0
 pytest-cov==7.1.0
@@ -28,4 +34,8 @@ google-auth==2.36.0
 # Transporte HTTP que exige google.auth.transport.requests.Request()
 # para esa verificación (google-auth no trae uno propio con httpx).
 requests==2.34.2
+# Login LDAP institucional (junto a Google OAuth, ver config/settings.py).
+# Necesita las libs de sistema libldap2-dev/libsasl2-dev en la imagen
+# Docker para compilar python-ldap — ver Dockerfile.
+django-auth-ldap==5.1.0
 

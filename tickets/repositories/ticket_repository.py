@@ -28,9 +28,24 @@ class TicketRepository(DjangoRepository[Ticket]):
     def list(self, spec: Specification | None = None) -> QuerySet[Ticket]:
         return super().list(spec).prefetch_related("comments", "time_logs")
 
-    def add_comment(self, ticket: Ticket, author, body: str) -> TicketComment:
+    def get_by_code(self, code: str) -> Ticket | None:
+        return self.get_queryset().filter(code=code).first()
+
+    def get_by_external_message_id(self, message_id: str) -> Ticket | None:
+        return self.get_queryset().filter(external_message_id=message_id).first()
+
+    def get_comment_by_external_message_id(self, message_id: str) -> TicketComment | None:
+        """Idempotencia de respuestas de correo: un `Message-ID` de
+        respuesta ya procesado no debe generar un segundo comentario."""
+        return TicketComment.objects.filter(external_message_id=message_id).first()
+
+    def add_comment(
+        self, ticket: Ticket, author, body: str, is_internal: bool = False,
+        external_message_id: str | None = None,
+    ) -> TicketComment:
         return TicketComment.objects.create(
-            ticket=ticket, author_id=author.id, author_username=author.username, body=body
+            ticket=ticket, author_id=author.id, author_username=author.username,
+            body=body, is_internal=is_internal, external_message_id=external_message_id,
         )
 
     def add_time_log(

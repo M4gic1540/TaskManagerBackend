@@ -1,37 +1,28 @@
-"""Factory Pattern: construye Ticket aplicando reglas por categoría
-(ej. prioridad default) sin ensuciar el Service con condicionales."""
+"""Factory Pattern: construye el payload de creación de un Ticket,
+manteniendo al Service ciego a los detalles de construcción."""
 from __future__ import annotations
-
-from tickets.models import TicketCategory, TicketPriority
-
-_DEFAULT_PRIORITY_BY_CATEGORY: dict[str, str] = {
-    TicketCategory.RED: TicketPriority.ALTA,
-    TicketCategory.ACCESOS: TicketPriority.ALTA,
-    TicketCategory.HARDWARE: TicketPriority.MEDIA,
-    TicketCategory.SOFTWARE: TicketPriority.MEDIA,
-    TicketCategory.RECLAMOS: TicketPriority.BAJA,
-    TicketCategory.SUGERENCIAS: TicketPriority.BAJA,
-    TicketCategory.RESERVA_DE_SALAS: TicketPriority.BAJA,
-    TicketCategory.OTRO: TicketPriority.BAJA,
-}
 
 
 class TicketFactory:
-    """Encapsula reglas de creación. Si el llamador no especifica
-    prioridad, se infiere de la categoría."""
-
     @staticmethod
     def build_creation_payload(
-        *, title: str, description: str, category: str, priority: str | None, requester
+        *,
+        title: str,
+        description: str,
+        category: str,
+        requester,
+        requester_email: str | None = None,
+        external_message_id: str | None = None,
     ) -> dict:
-        resolved_priority = priority or _DEFAULT_PRIORITY_BY_CATEGORY.get(
-            category, TicketPriority.MEDIA
-        )
-        return {
+        payload = {
             "title": title.strip(),
             "description": description.strip(),
             "category": category,
-            "priority": resolved_priority,
             "requester_id": requester.id,
             "requester_username": requester.username,
         }
+        if requester_email is not None:
+            payload["requester_email"] = requester_email
+        if external_message_id is not None:
+            payload["external_message_id"] = external_message_id
+        return payload

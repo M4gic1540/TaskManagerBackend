@@ -90,6 +90,12 @@ services:
       # Secreto compartido con bff para auth/google-mint/ (ver
       # config/service_settings/accounts.py) — requerido, sin default.
       INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?Falta INTERNAL_AUTH_SECRET en .env}
+      # Login LDAP institucional (ver config/settings.py). Vacío =
+      # LDAP desactivado, no rompe nada.
+      LDAP_SERVER_URI: ${LDAP_SERVER_URI:-}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+      LDAP_USER_SEARCH_BASE: ${LDAP_USER_SEARCH_BASE:-}
     depends_on:
       db-accounts:
         condition: service_healthy
@@ -116,8 +122,8 @@ services:
       TICKETS_DB_NAME: ${TICKETS_DB_NAME:-tickets}
       TICKETS_DB_USER: ${TICKETS_DB_USER:-tickets}
       TICKETS_DB_PASSWORD: ${TICKETS_DB_PASSWORD:?Falta TICKETS_DB_PASSWORD en .env}
-      # Correo de "ticket creado" (ver tickets/observers.py). Sin
-      # EMAIL_HOST_USER/PASSWORD reales cae al backend de consola
+      # Correo saliente (respuestas de ticket, ver tickets/observers.py).
+      # Sin EMAIL_HOST_USER/PASSWORD reales cae al backend de consola
       # (se ve en `docker compose logs tickets`, no rompe nada).
       EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
       EMAIL_HOST: ${EMAIL_HOST:-localhost}
@@ -126,8 +132,22 @@ services:
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@cmm.uchile.cl}
-      TICKET_NOTIFICATION_EMAIL: ${TICKET_NOTIFICATION_EMAIL:-sistemas@cmm.uchile.cl}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      # Clasificación automática de tickets: modelo local entrenado con
+      # scikit-learn (ver tickets/ml/), sin servicios externos.
+      TICKET_AI_CONFIDENCE_THRESHOLD: ${TICKET_AI_CONFIDENCE_THRESHOLD:-0.5}
+      # SLA plano en horas (ver tickets/services/dashboard_service.py).
+      TICKET_SLA_HOURS: ${TICKET_SLA_HOURS:-8}
+      # Ingesta de correo entrante (ver tickets/management/commands/
+      # poll_inbound_email.py) — mismas vars que usa el servicio
+      # tickets-email-poller de abajo. Vacío = desactivado.
+      INBOUND_EMAIL_HOST: ${INBOUND_EMAIL_HOST:-}
+      INBOUND_EMAIL_PORT: ${INBOUND_EMAIL_PORT:-993}
+      INBOUND_EMAIL_USER: ${INBOUND_EMAIL_USER:-}
+      INBOUND_EMAIL_PASSWORD: ${INBOUND_EMAIL_PASSWORD:-}
+      INBOUND_EMAIL_USE_SSL: ${INBOUND_EMAIL_USE_SSL:-True}
+      INBOUND_EMAIL_FOLDER: ${INBOUND_EMAIL_FOLDER:-INBOX}
+      INBOUND_EMAIL_POLL_INTERVAL_SECONDS: ${INBOUND_EMAIL_POLL_INTERVAL_SECONDS:-60}
     depends_on:
       db-tickets:
         condition: service_healthy
@@ -138,6 +158,45 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+
+  # Ingesta de correo -> ticket (ver tickets/management/commands/
+  # poll_inbound_email.py). Mismo build/imagen que 'tickets' (misma BD,
+  # mismo Ticket model), pero corre el poller en loop en vez de
+  # gunicorn — proceso de fondo separado, no atiende HTTP.
+  tickets-email-poller:
+    build:
+      context: .
+      args:
+        SERVICE_SETTINGS: config.service_settings.tickets
+    command: ["python", "manage.py", "poll_inbound_email"]
+    environment:
+      DJANGO_SETTINGS_MODULE: config.service_settings.tickets
+      SECRET_KEY: ${SECRET_KEY:?Falta SECRET_KEY en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},tickets
+      TICKETS_DB_ENGINE: django.db.backends.postgresql
+      TICKETS_DB_HOST: db-tickets
+      TICKETS_DB_PORT: 5432
+      TICKETS_DB_NAME: ${TICKETS_DB_NAME:-tickets}
+      TICKETS_DB_USER: ${TICKETS_DB_USER:-tickets}
+      TICKETS_DB_PASSWORD: ${TICKETS_DB_PASSWORD:?Falta TICKETS_DB_PASSWORD en .env}
+      TICKET_AI_CONFIDENCE_THRESHOLD: ${TICKET_AI_CONFIDENCE_THRESHOLD:-0.5}
+      INBOUND_EMAIL_HOST: ${INBOUND_EMAIL_HOST:-}
+      INBOUND_EMAIL_PORT: ${INBOUND_EMAIL_PORT:-993}
+      INBOUND_EMAIL_USER: ${INBOUND_EMAIL_USER:-}
+      INBOUND_EMAIL_PASSWORD: ${INBOUND_EMAIL_PASSWORD:-}
+      INBOUND_EMAIL_USE_SSL: ${INBOUND_EMAIL_USE_SSL:-True}
+      INBOUND_EMAIL_FOLDER: ${INBOUND_EMAIL_FOLDER:-INBOX}
+      INBOUND_EMAIL_POLL_INTERVAL_SECONDS: ${INBOUND_EMAIL_POLL_INTERVAL_SECONDS:-60}
+    depends_on:
+      db-tickets:
+        condition: service_healthy
+      # El servicio web 'tickets' es quien migra esta misma base (ver
+      # entrypoint.sh) — esperar a que esté healthy evita que este
+      # contenedor arranque contra un esquema todavía no migrado, y
+      # evita que ambos corran `migrate` en paralelo.
+      tickets:
+        condition: service_healthy
+    networks: [backend]
 
   inventory:
     build:

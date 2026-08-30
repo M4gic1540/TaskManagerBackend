@@ -12,14 +12,6 @@ class TicketByStatusSpec(Specification):
         return Q(status=self.status)
 
 
-class TicketByPrioritySpec(Specification):
-    def __init__(self, priority: str):
-        self.priority = priority
-
-    def to_query(self) -> Q:
-        return Q(priority=self.priority)
-
-
 class TicketByCategorySpec(Specification):
     def __init__(self, category: str):
         self.category = category

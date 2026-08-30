@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from tickets.models import Ticket, TicketAttachment, TicketComment, TicketTimeLog
+from tickets.models import (
+    ResponseTemplate,
+    Ticket,
+    TicketAttachment,
+    TicketComment,
+    TicketTimeLog,
+)
 
 
 class TicketCommentInline(admin.TabularInline):
@@ -15,8 +21,8 @@ class TicketTimeLogInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ("code", "title", "status", "priority", "category", "requester_username", "assigned_technician_username")
-    list_filter = ("status", "priority", "category")
+    list_display = ("code", "title", "status", "category", "requester_username", "assigned_technician_username")
+    list_filter = ("status", "category")
     search_fields = ("code", "title", "description")
     inlines = [TicketCommentInline, TicketTimeLogInline]
 
@@ -24,3 +30,9 @@ class TicketAdmin(admin.ModelAdmin):
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
     list_display = ("ticket", "original_filename", "uploaded_by_username", "uploaded_at")
+
+
+@admin.register(ResponseTemplate)
+class ResponseTemplateAdmin(admin.ModelAdmin):
+    list_display = ("name", "subject_template", "updated_at")
+    search_fields = ("name", "subject_template", "body_template")

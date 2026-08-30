@@ -42,6 +42,14 @@ REST_FRAMEWORK = {
     ),
 }
 
+# Umbral de confianza para aplicar la sugerencia del clasificador
+# local de tickets (ver tickets/ml/classifier.py y
+# tickets/observers.py::_classify_ticket_with_ml). Por debajo de esto
+# el campo (categoría o prioridad) simplemente no se toca.
+TICKET_AI_CONFIDENCE_THRESHOLD = config(
+    "TICKET_AI_CONFIDENCE_THRESHOLD", default=0.5, cast=float
+)
+
 if IS_TESTING:
     DATABASES = {
         "default": {

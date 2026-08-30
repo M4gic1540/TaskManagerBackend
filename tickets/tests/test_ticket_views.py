@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from accounts.enums import Role
 from core.auth.jwt_claims_authentication import TokenClaimsUser
-from tickets.models import Ticket, TicketCategory, TicketPriority, TicketStatus
+from tickets.models import Ticket, TicketCategory, TicketStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -41,7 +41,6 @@ def _create_ticket(*, requester, technician=None, status=TicketStatus.ABIERTO):
         title="Impresora no imprime",
         description="La impresora del piso 2 no responde.",
         category=TicketCategory.HARDWARE,
-        priority=TicketPriority.MEDIA,
         status=status,
         requester_id=requester.id,
         requester_username=requester.username,
@@ -160,6 +159,23 @@ class TestTicketStatusChange:
         assert response.status_code == 200
         assert response.data["status"] == TicketStatus.EN_PROGRESO
 
+    def test_unassigned_technician_cannot_change_status(self, api_client, tecnico, usuario):
+        """Regresión: un cambio de permisos dejó pasar a cualquier
+        técnico (no solo el asignado) a cambiar el estado de un ticket
+        ajeno. IsOwnerOrAssignedTechnicianOrAdmin debe seguir exigiendo
+        que el técnico sea el asignado, igual que TicketCloseView."""
+        otro_tecnico = _user(99, Role.TECNICO, username="tecnico99")
+        ticket = _create_ticket(requester=usuario, technician=tecnico, status=TicketStatus.ASIGNADO)
+        api_client.force_authenticate(user=otro_tecnico)
+
+        response = api_client.post(
+            f"/api/v1/tickets/{ticket.pk}/status/",
+            {"status": TicketStatus.EN_PROGRESO},
+            format="json",
+        )
+
+        assert response.status_code == 403
+
 
 class TestTicketClose:
     def test_close_requires_resolution_notes(self, api_client, tecnico, usuario):
@@ -222,3 +238,61 @@ class TestDashboardSummary:
         api_client.force_authenticate(user=usuario)
         response = api_client.get("/api/v1/tickets/dashboard/")
         assert response.status_code == 403
+
+
+class TestResponseTemplates:
+    def test_admin_can_create_template(self, api_client, admin):
+        api_client.force_authenticate(user=admin)
+        response = api_client.post(
+            "/api/v1/tickets/templates/",
+            {
+                "name": "Wifi resuelto",
+                "subject_template": "Re: [{code}] {title}",
+                "body_template": "Hola, ya revisamos tu solicitud de wifi y quedó resuelta.",
+            },
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.data["name"] == "Wifi resuelto"
+
+    def test_tecnico_cannot_create_template(self, api_client, tecnico):
+        api_client.force_authenticate(user=tecnico)
+        response = api_client.post(
+            "/api/v1/tickets/templates/",
+            {"name": "x", "subject_template": "x", "body_template": "x"},
+            format="json",
+        )
+        assert response.status_code == 403
+
+    def test_tecnico_can_list_templates(self, api_client, admin, tecnico):
+        api_client.force_authenticate(user=admin)
+        api_client.post(
+            "/api/v1/tickets/templates/",
+            {"name": "Plantilla 1", "subject_template": "s", "body_template": "b"},
+            format="json",
+        )
+
+        api_client.force_authenticate(user=tecnico)
+        response = api_client.get("/api/v1/tickets/templates/")
+
+        assert response.status_code == 200
+        assert len(response.data) == 1
+
+    def test_admin_can_update_and_delete_template(self, api_client, admin):
+        api_client.force_authenticate(user=admin)
+        created = api_client.post(
+            "/api/v1/tickets/templates/",
+            {"name": "Original", "subject_template": "s", "body_template": "b"},
+            format="json",
+        ).data
+
+        updated = api_client.patch(
+            f"/api/v1/tickets/templates/{created['id']}/",
+            {"name": "Actualizada"}, format="json",
+        )
+        assert updated.status_code == 200
+        assert updated.data["name"] == "Actualizada"
+
+        deleted = api_client.delete(f"/api/v1/tickets/templates/{created['id']}/")
+        assert deleted.status_code == 204
+

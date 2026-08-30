@@ -43,23 +43,31 @@ class TestGoogleAuthMintView:
         )
         assert response.status_code == 403
 
-    def test_creates_user_and_mints_tokens_for_new_email(self):
+    def test_rejects_unknown_email(self):
+        """Ya no auto-provisiona cuentas: el usuario final no tiene
+        acceso al sistema, así que un email sin cuenta previa se
+        rechaza en vez de crear un USUARIO nuevo."""
         response = Client().post(
             reverse("google-mint"),
-            data={"email": "Nuevo@Example.com", "first_name": "Ana", "last_name": "Soto"},
+            data={"email": "desconocido@example.com", "first_name": "Ana"},
             content_type="application/json",
             headers={"X-Internal-Auth": "test-shared-secret"},
         )
 
-        assert response.status_code == 200
-        body = response.json()
-        assert "access" in body and "refresh" in body
+        assert response.status_code == 403
+        assert not User.objects.filter(email="desconocido@example.com").exists()
 
-        user = User.objects.get(email="nuevo@example.com")
-        assert user.username == "nuevo@example.com"
-        assert user.first_name == "Ana"
-        assert user.role == Role.USUARIO
-        assert not user.has_usable_password()
+    def test_rejects_usuario_role(self):
+        User.objects.create(username="usuario1", email="usuario1@example.com", role=Role.USUARIO)
+
+        response = Client().post(
+            reverse("google-mint"),
+            data={"email": "usuario1@example.com"},
+            content_type="application/json",
+            headers={"X-Internal-Auth": "test-shared-secret"},
+        )
+
+        assert response.status_code == 403
 
     def test_reuses_existing_user_by_email_without_touching_role(self):
         existing = User.objects.create(
